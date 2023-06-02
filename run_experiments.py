@@ -4,7 +4,7 @@ import itertools
 import os
 
 
-NUMBER_OF_PARALLEL_PROCESSES = os.cpu_count() - 2
+NUMBER_OF_PARALLEL_PROCESSES = 15
 
 
 def run_simulation(
@@ -40,14 +40,14 @@ def run_simulation(
 # Parameters
 EXPERIMENT_TYPE = "sensitivity_analysis"
 
-datasets = ["datasets/sample_dataset.json"]
+datasets = ["datasets/dataset1.json"]
 algorithms = ["nsgaii"]
-maintenance_batches = [3]
+maintenance_batches = [5]
 
-population_sizes = [20]
-number_of_generations = [10, 20, 30]
+population_sizes = [300]
+number_of_generations = [100, 200, 300, 400, 500, 600, 700, 800, 900, 1000, 1100, 1200, 1300, 1400, 1500]
 crossover_probabilities = [1]
-mutation_probabilities = [0, 0.5, 1]
+mutation_probabilities = [0, 0.25, 0.5, 0.75, 1]
 
 print(f"Datasets: {datasets}")
 print(f"Algorithms: {algorithms}")
@@ -75,7 +75,7 @@ combinations = list(
 processes = []
 
 print(f"EXECUTING {len(combinations)} COMBINATIONS")
-
+exit(1)
 for i, parameters in enumerate(combinations, 1):
     # Parsing parameters
     dataset = parameters[0]
