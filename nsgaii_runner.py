@@ -1,7 +1,6 @@
 # EdgeSimPy components
 from edge_sim_py import *
 
-
 # EdgeSimPy extensions
 from simulator.simulator_extensions import *
 
@@ -19,29 +18,23 @@ from pymoo.algorithms.moo.nsga2 import NSGA2
 from pymoo.factory import get_sampling, get_crossover, get_mutation
 
 # Python libraries
-import gc
-import os
 import json
-import random
+import pstats
 import argparse
 import numpy as np
+import cProfile as profile
 
 
-def run_edgesimpy_simulation(executing_nsgaii_runner=True, parameters: dict = {}):
-    # Parsing NSGA-II parameters string
-    parameters_string = ""
-    for key, value in parameters.items():
-        if key != "dataset" and key != "solution":
-            parameters_string += f"{key}={value};"
+PERFORMANCE_DEBUGGING = True
 
+
+def prepare_edgesimpy_simulation(executing_nsgaii_runner=True, parameters: dict = {}):
     simulator = Simulator(
         tick_duration=1,
         tick_unit="seconds",
         stopping_criterion=maintenance_stopping_criterion,
         resource_management_algorithm=eval("nsgaii"),
-        resource_management_algorithm_parameters=parameters,
-        dump_interval=100000,
-        logs_directory=f"logs/algorithm=nsgaii;{parameters_string}",
+        dump_interval=float("inf"),
         user_defined_functions=[immobile],
     )
     simulator.executing_nsgaii_runner = executing_nsgaii_runner
@@ -49,10 +42,46 @@ def run_edgesimpy_simulation(executing_nsgaii_runner=True, parameters: dict = {}
     # Loading the dataset
     simulator.initialize(input_file=parameters["dataset"])
 
+    return simulator
+
+
+def reset_simulated_environment():
+    NetworkFlow._object_count = 0
+    NetworkFlow._instances = []
+
+    simulator = Simulator(
+        tick_duration=1,
+        tick_unit="seconds",
+        stopping_criterion=maintenance_stopping_criterion,
+        resource_management_algorithm=eval("nsgaii"),
+        dump_interval=float("inf"),
+        user_defined_functions=[immobile],
+    )
+    simulator.executing_nsgaii_runner = True
+
+    simulator.topology = ComponentManager.topology
+    simulator.initialize_agent(agent=ComponentManager.topology)
+
+    for component_instance in ComponentManager.components:
+        component_builder = globals()[f"{component_instance.__class__.__name__}Builder"]
+        component_builder.create_attributes(component_instance=component_instance, attributes_metadata=component_instance.attributes)
+        component_builder.create_relationships(component_instance=component_instance)
+
+        if hasattr(component_instance, "model") and hasattr(component_instance, "unique_id"):
+            simulator.initialize_agent(agent=component_instance)
+
+    return simulator
+
+
+def run_edgesimpy_simulation(simulator):
     # Executing the simulation
     simulator.run_model()
-
-    return simulator.model_metrics
+    simulation_metrics = {
+        "maintenance_time": int(simulator.model_metrics["overall"]["maintenance_time"]),
+        "delay_sla_violations": int(simulator.model_metrics["overall"]["overall_delay_sla_violations"]),
+        "penalty": int(simulator.model_metrics["overall"]["penalty"]),
+    }
+    return simulation_metrics
 
 
 class MyDisplay(Display):
@@ -92,6 +121,8 @@ class PlacementProblem(Problem):
 
         self.chromosome_size = int(self.number_of_services * self.maintenance_batches)
 
+        self.simulator = prepare_edgesimpy_simulation(parameters=self.parameters)
+
         super().__init__(
             n_var=self.chromosome_size,
             n_obj=2,
@@ -114,13 +145,7 @@ class PlacementProblem(Problem):
         out["F"] = np.array([item[0] for item in output])
         out["G"] = np.array([item[1] for item in output])
 
-        del ComponentManager._ComponentManager__model
-        for component in ComponentManager.__subclasses__():
-            if component.__name__ != "Simulator":
-                del component._instances
-        gc.collect()
-
-    def get_fitness_score_and_constraints(self, solution: list) -> tuple:
+    def get_fitness_score_and_constraints(self, solution) -> tuple:
         """Calculates the fitness score and penalties of a solution based on the problem definition.
 
         Args:
@@ -130,16 +155,21 @@ class PlacementProblem(Problem):
             tuple: Output of the evaluation function containing the fitness scores of the solution and its penalties.
         """
         # Parsing the tested solution to send it to the EdgeSimPy runner
-        formatted_solution = [solution[i : i + self.number_of_services] for i in range(0, len(solution), self.number_of_services)]
-        self.parameters["solution"] = formatted_solution
+        formatted_solution = [
+            list(solution[i : i + self.number_of_services]) for i in range(0, len(solution), self.number_of_services)
+        ]
+        self.simulator.resource_management_algorithm_parameters["solution"] = formatted_solution
 
         # Applying the maintenance plan
-        simulation_metrics = run_edgesimpy_simulation(parameters=self.parameters)
+        simulation_metrics = run_edgesimpy_simulation(simulator=self.simulator)
+        self.simulator = reset_simulated_environment()
 
         # Aggregating fitness values
         maintenance_time = simulation_metrics["maintenance_time"]
-        delay_sla_violations = simulation_metrics["overall_delay_sla_violations"]
+        delay_sla_violations = simulation_metrics["delay_sla_violations"]
         fitness = (maintenance_time, delay_sla_violations)
+
+        # print(f"solution: {formatted_solution}. Fitness: {fitness}")
 
         # Aggregating penalties
         penalty = simulation_metrics["penalty"]
@@ -155,12 +185,12 @@ def nsgaii_runner(parameters: dict = {}) -> list:
     cross_prob = parameters["cross_prob"]
     mut_prob = parameters["mut_prob"]
     n_gen = parameters["n_gen"]
+    maintenance_batches = parameters["maintenance_batches"]
 
     with open(f"{os.getcwd()}/{dataset}", "r", encoding="UTF-8") as read_file:
         data = json.load(read_file)
         number_of_services = len(data["Service"])
         number_of_edge_servers = len(data["EdgeServer"])
-    maintenance_batches = parameters["maintenance_batches"]
 
     # Defining genetic algorithm's attributes
     method = NSGA2(
@@ -168,7 +198,7 @@ def nsgaii_runner(parameters: dict = {}) -> list:
         sampling=get_sampling("int_random"),
         crossover=get_crossover("int_ux", prob=cross_prob),
         mutation=get_mutation("int_pm", prob=mut_prob),
-        eliminate_duplicates=True,
+        eliminate_duplicates=False,
     )
 
     # Running the genetic algorithm
@@ -178,7 +208,16 @@ def nsgaii_runner(parameters: dict = {}) -> list:
         number_of_edge_servers=number_of_edge_servers,
         maintenance_batches=maintenance_batches,
     )
-    res = minimize(problem, method, termination=("n_gen", n_gen), seed=seed_value, verbose=True, display=MyDisplay())
+    res = minimize(
+        problem,
+        method,
+        termination=("n_gen", n_gen),
+        seed=seed_value,
+        verbose=True,
+        display=MyDisplay(),
+    )
+
+    return
 
     # Parsing the NSGA-II output
     solutions = []
@@ -202,8 +241,16 @@ def nsgaii_runner(parameters: dict = {}) -> list:
         solutions,
         key=lambda s: (
             s["Penalty"],
-            min_max_norm(x=s["Maintenance Time"], minimum=min_maintenance_time, maximum=max_maintenance_time)
-            + min_max_norm(x=s["SLA Violations"], minimum=min_sla_violations, maximum=max_sla_violations),
+            min_max_norm(
+                x=s["Maintenance Time"],
+                minimum=min_maintenance_time,
+                maximum=max_maintenance_time,
+            )
+            + min_max_norm(
+                x=s["SLA Violations"],
+                minimum=min_sla_violations,
+                maximum=max_sla_violations,
+            ),
         ),
     )
 
@@ -222,11 +269,50 @@ def nsgaii_runner(parameters: dict = {}) -> list:
         "mut_prob": mut_prob,
         "solution": [best_solution[i : i + number_of_services] for i in range(0, len(best_solution), number_of_services)],
     }
-    simulation_metrics = run_edgesimpy_simulation(executing_nsgaii_runner=False, parameters=parameters)
-    print(f"==== SIMULATION RESULT ===")
-    print(f"chromosome => {best_solution}")
-    for key, value in simulation_metrics.items():
-        print(f"\t{key}: {value}")
+
+    simulator = Simulator(
+        tick_duration=1,
+        tick_unit="seconds",
+        stopping_criterion=maintenance_stopping_criterion,
+        resource_management_algorithm=eval("nsgaii"),
+        dump_interval=float("inf"),
+        resource_management_algorithm_parameters=parameters,
+        user_defined_functions=[immobile],
+    )
+    # Loading the dataset
+    simulator.initialize(input_file=parameters["dataset"])
+
+    # Executing the simulation
+    simulator.executing_nsgaii_runner = False
+    simulator.run_model()
+
+    print("\n")
+    print("============================")
+    print("============================")
+    print("==== SIMULATION RESULTS ====")
+    print("============================")
+    print("============================")
+
+    verbose_metrics_to_hide = [
+        "wait_times",
+        "pulling_times",
+        "state_migration_times",
+        "sizes_of_cached_layers",
+        "sizes_of_uncached_layers",
+        "migration_times",
+    ]
+
+    print("=== OVERALL ===")
+    overall_metrics = simulator.model_metrics["overall"]
+    for key, value in overall_metrics.items():
+        if key in verbose_metrics_to_hide:
+            continue
+        print(f"{key}: {value}")
+
+    print("\n=== PER BATCH ===")
+    per_batch_metrics = simulator.model_metrics["per_batch"]
+    for key, value in per_batch_metrics.items():
+        print(f"{key}: {value}")
 
 
 def main(parameters: dict = {}):
@@ -258,7 +344,16 @@ if __name__ == "__main__":
         "n_gen": int(args.n_gen),
         "cross_prob": float(args.cross_prob),
         "mut_prob": float(args.mut_prob),
-        "maintenance_batches": float(args.maintenance_batches),
+        "maintenance_batches": int(args.maintenance_batches),
     }
 
+    if PERFORMANCE_DEBUGGING:
+        prof = profile.Profile()
+        prof.enable()
+
     main(parameters=parameters)
+
+    if PERFORMANCE_DEBUGGING:
+        prof.disable()
+        stats = pstats.Stats(prof).strip_dirs().sort_stats("cumtime")
+        stats.print_stats(40)

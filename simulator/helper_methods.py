@@ -17,6 +17,7 @@ import random
 
 def load_edgesimpy_extensions():
     # Loading EdgeSimPy extensions
+    Simulator.initialize = simulator_initialize
     Simulator.step = simulator_step
     Simulator.run_model = simulator_run_model
     Simulator.monitor = simulator_monitor
