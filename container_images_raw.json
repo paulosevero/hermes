@@ -420,123 +420,6 @@
         ]
     },
     {
-        "name": "elixir",
-        "namespace": "library",
-        "repository_type": "image",
-        "status": 1,
-        "status_description": "active",
-        "description": "Elixir is a dynamic, functional language for building scalable and maintainable applications.",
-        "is_private": false,
-        "star_count": 539,
-        "pull_count": 49053614,
-        "last_updated": "2023-05-31T19:44:06.112902Z",
-        "date_registered": "2016-03-04T18:13:49.837627Z",
-        "affiliation": "",
-        "media_types": [
-            "application/octet-stream",
-            "application/vnd.docker.container.image.v1+json",
-            "application/vnd.docker.distribution.manifest.list.v2+json"
-        ],
-        "content_types": [
-            "unrecognized",
-            "image"
-        ],
-        "digest": "sha256:c9530402ade52d7fee01d16c83212519b4d754143dfe9c4af79cb1c87596bf04",
-        "architecture": "amd64",
-        "os": "linux",
-        "os_version": null,
-        "last_pulled": "2023-05-31T19:33:24.984414Z",
-        "last_pushed": "2023-05-24T01:51:58.508307Z",
-        "size": 551.2752485275269,
-        "layers": [
-            {
-                "digest": "sha256:bd73737482dd5575526c7207872963479808d979ab2741c321706b8553918474",
-                "size": 52.4988431930542,
-                "instruction": "ADD file:150a6453ab2258061c1a1549ab119df752bdc2c2c84028fa0e83a0663cd8cedf in / "
-            },
-            {
-                "digest": "sha256:6710592d62aa1338ac1c1c363dedc255659f666cc41441c7e0f735c484db10ff",
-                "size": 15.030373573303223,
-                "instruction": "/bin/sh -c set -eux; \tapt-get update; \tapt-get install -y --no-install-recommends \t\tca-certificates \t\tcurl \t\tgnupg \t\tnetbase \t\twget \t; \trm -rf /var/lib/apt/lists/*"
-            },
-            {
-                "digest": "sha256:75256935197ed1bb3b994a77c01efa00349b901014448a260fafd9c3719a741d",
-                "size": 52.055731773376465,
-                "instruction": "/bin/sh -c apt-get update && apt-get install -y --no-install-recommends \t\tgit \t\tmercurial \t\topenssh-client \t\tsubversion \t\t\t\tprocps \t&& rm -rf /var/lib/apt/lists/*"
-            },
-            {
-                "digest": "sha256:c1e5026c64577dee4b6bac20b18196f964a41d8b9016fbbbada0c70b601cd5bf",
-                "size": 187.73437213897705,
-                "instruction": "/bin/sh -c set -ex; \tapt-get update; \tapt-get install -y --no-install-recommends \t\tautoconf \t\tautomake \t\tbzip2 \t\tdpkg-dev \t\tfile \t\tg++ \t\tgcc \t\timagemagick \t\tlibbz2-dev \t\tlibc6-dev \t\tlibcurl4-openssl-dev \t\tlibdb-dev \t\tlibevent-dev \t\tlibffi-dev \t\tlibgdbm-dev \t\tlibglib2.0-dev \t\tlibgmp-dev \t\tlibjpeg-dev \t\tlibkrb5-dev \t\tliblzma-dev \t\tlibmagickcore-dev \t\tlibmagickwand-dev \t\tlibmaxminddb-dev \t\tlibncurses5-dev \t\tlibncursesw5-dev \t\tlibpng-dev \t\tlibpq-dev \t\tlibreadline-dev \t\tlibsqlite3-dev \t\tlibssl-dev \t\tlibtool \t\tlibwebp-dev \t\tlibxml2-dev \t\tlibxslt-dev \t\tlibyaml-dev \t\tmake \t\tpatch \t\tunzip \t\txz-utils \t\tzlib1g-dev \t\t\t\t$( \t\t\tif apt-cache show 'default-libmysqlclient-dev' 2>/dev/null | grep -q '^Version:'; then \t\t\t\techo 'default-libmysqlclient-dev'; \t\t\telse \t\t\t\techo 'libmysqlclient-dev'; \t\t\tfi \t\t) \t; \trm -rf /var/lib/apt/lists/*"
-            },
-            {
-                "digest": "sha256:f47345282e4f30bb7633368c1dc467dedf1068026e0d55716728304b9a167ac3",
-                "size": 237.1596794128418,
-                "instruction": "/bin/sh -c set -xe \t&& OTP_DOWNLOAD_URL=\"https://github.com/erlang/otp/archive/OTP-${OTP_VERSION}.tar.gz\" \t&& OTP_DOWNLOAD_SHA256=\"29a50b17cb4bc326f01e4cbb2badb6a31ec586525f7c2f29166a0c6229b53f24\" \t&& runtimeDeps='libodbc1 \t\t\tlibsctp1 \t\t\tlibwxgtk3.0 \t\t\tlibwxgtk-webview3.0-gtk3-0v5' \t&& buildDeps='unixodbc-dev \t\t\tlibsctp-dev \t\t\tlibwxgtk-webview3.0-gtk3-dev' \t&& apt-get update \t&& apt-get install -y --no-install-recommends $runtimeDeps \t&& apt-get install -y --no-install-recommends $buildDeps \t&& curl -fSL -o otp-src.tar.gz \"$OTP_DOWNLOAD_URL\" \t&& echo \"$OTP_DOWNLOAD_SHA256  otp-src.tar.gz\" | sha256sum -c - \t&& export ERL_TOP=\"/usr/src/otp_src_${OTP_VERSION%%@*}\" \t&& mkdir -vp $ERL_TOP \t&& tar -xzf otp-src.tar.gz -C $ERL_TOP --strip-components=1 \t&& rm otp-src.tar.gz \t&& ( cd $ERL_TOP \t  && ./otp_build autoconf \t  && gnuArch=\"$(dpkg-architecture --query DEB_HOST_GNU_TYPE)\" \t  && ./configure --build=\"$gnuArch\" \t  && make -j$(nproc) \t  && make -j$(nproc) docs DOC_TARGETS=chunks \t  && make install install-docs DOC_TARGETS=chunks ) \t&& find /usr/local -name examples | xargs rm -rf \t&& apt-get purge -y --auto-remove $buildDeps \t&& rm -rf $ERL_TOP /var/lib/apt/lists/*"
-            },
-            {
-                "digest": "sha256:af585b6b1917aa1ea675b8734a3a1ba52cac68a9bbacb3d2af7f766fe8287559",
-                "size": 5.865114212036133,
-                "instruction": "/bin/sh -c set -xe \t&& ELIXIR_DOWNLOAD_URL=\"https://github.com/elixir-lang/elixir/archive/${ELIXIR_VERSION}.tar.gz\" \t&& ELIXIR_DOWNLOAD_SHA256=\"2ea249566c67e57f8365ecdcd0efd9b6c375f57609b3ac2de326488ac37c8ebd\" \t&& curl -fSL -o elixir-src.tar.gz $ELIXIR_DOWNLOAD_URL \t&& echo \"$ELIXIR_DOWNLOAD_SHA256  elixir-src.tar.gz\" | sha256sum -c - \t&& mkdir -p /usr/local/src/elixir \t&& tar -xzC /usr/local/src/elixir --strip-components=1 -f elixir-src.tar.gz \t&& rm elixir-src.tar.gz \t&& cd /usr/local/src/elixir \t&& make install clean \t&& find /usr/local/src/elixir/ -type f -not -regex \"/usr/local/src/elixir/lib/[^\\/]*/lib.*\" -exec rm -rf {} + \t&& find /usr/local/src/elixir/ -type d -depth -empty -delete"
-            }
-        ]
-    },
-    {
-        "name": "rust",
-        "namespace": "library",
-        "repository_type": "image",
-        "status": 1,
-        "status_description": "active",
-        "description": "Rust is a systems programming language focused on safety, speed, and concurrency.",
-        "is_private": false,
-        "star_count": 803,
-        "pull_count": 62858926,
-        "last_updated": "2023-05-23T21:07:02.723328Z",
-        "date_registered": "2017-08-10T21:45:13.885626Z",
-        "affiliation": "",
-        "media_types": [
-            "application/vnd.docker.container.image.v1+json",
-            "application/vnd.docker.distribution.manifest.list.v2+json"
-        ],
-        "content_types": [
-            "image"
-        ],
-        "digest": "sha256:b7e0e2c6199fb5f309742c5eba637415c25ca2bed47fa5e80e274d4510ddfa3a",
-        "architecture": "amd64",
-        "os": "linux",
-        "os_version": null,
-        "last_pulled": "2023-05-31T19:32:54.333914Z",
-        "last_pushed": "2023-05-23T15:31:05.814018Z",
-        "size": 473.04289054870605,
-        "layers": [
-            {
-                "digest": "sha256:bd73737482dd5575526c7207872963479808d979ab2741c321706b8553918474",
-                "size": 52.4988431930542,
-                "instruction": "ADD file:150a6453ab2258061c1a1549ab119df752bdc2c2c84028fa0e83a0663cd8cedf in / "
-            },
-            {
-                "digest": "sha256:6710592d62aa1338ac1c1c363dedc255659f666cc41441c7e0f735c484db10ff",
-                "size": 15.030373573303223,
-                "instruction": "/bin/sh -c set -eux; \tapt-get update; \tapt-get install -y --no-install-recommends \t\tca-certificates \t\tcurl \t\tgnupg \t\tnetbase \t\twget \t; \trm -rf /var/lib/apt/lists/*"
-            },
-            {
-                "digest": "sha256:75256935197ed1bb3b994a77c01efa00349b901014448a260fafd9c3719a741d",
-                "size": 52.055731773376465,
-                "instruction": "/bin/sh -c apt-get update && apt-get install -y --no-install-recommends \t\tgit \t\tmercurial \t\topenssh-client \t\tsubversion \t\t\t\tprocps \t&& rm -rf /var/lib/apt/lists/*"
-            },
-            {
-                "digest": "sha256:c1e5026c64577dee4b6bac20b18196f964a41d8b9016fbbbada0c70b601cd5bf",
-                "size": 187.73437213897705,
-                "instruction": "/bin/sh -c set -ex; \tapt-get update; \tapt-get install -y --no-install-recommends \t\tautoconf \t\tautomake \t\tbzip2 \t\tdpkg-dev \t\tfile \t\tg++ \t\tgcc \t\timagemagick \t\tlibbz2-dev \t\tlibc6-dev \t\tlibcurl4-openssl-dev \t\tlibdb-dev \t\tlibevent-dev \t\tlibffi-dev \t\tlibgdbm-dev \t\tlibglib2.0-dev \t\tlibgmp-dev \t\tlibjpeg-dev \t\tlibkrb5-dev \t\tliblzma-dev \t\tlibmagickcore-dev \t\tlibmagickwand-dev \t\tlibmaxminddb-dev \t\tlibncurses5-dev \t\tlibncursesw5-dev \t\tlibpng-dev \t\tlibpq-dev \t\tlibreadline-dev \t\tlibsqlite3-dev \t\tlibssl-dev \t\tlibtool \t\tlibwebp-dev \t\tlibxml2-dev \t\tlibxslt-dev \t\tlibyaml-dev \t\tmake \t\tpatch \t\tunzip \t\txz-utils \t\tzlib1g-dev \t\t\t\t$( \t\t\tif apt-cache show 'default-libmysqlclient-dev' 2>/dev/null | grep -q '^Version:'; then \t\t\t\techo 'default-libmysqlclient-dev'; \t\t\telse \t\t\t\techo 'libmysqlclient-dev'; \t\t\tfi \t\t) \t; \trm -rf /var/lib/apt/lists/*"
-            },
-            {
-                "digest": "sha256:7e83136223c14c39ee709add02d3109ff76ca58491a816d0e9755f27eac139e2",
-                "size": 165.72356986999512,
-                "instruction": "/bin/sh -c set -eux;     dpkgArch=\"$(dpkg --print-architecture)\";     case \"${dpkgArch##*-}\" in         amd64) rustArch='x86_64-unknown-linux-gnu'; rustupSha256='bb31eaf643926b2ee9f4d8d6fc0e2835e03c0a60f34d324048aa194f0b29a71c' ;;         armhf) rustArch='armv7-unknown-linux-gnueabihf'; rustupSha256='6626b90205d7fe7058754c8e993b7efd91dedc6833a11a225b296b7c2941194f' ;;         arm64) rustArch='aarch64-unknown-linux-gnu'; rustupSha256='4ccaa7de6b8be1569f6b764acc28e84f5eca342f5162cd5c810891bff7ed7f74' ;;         i386) rustArch='i686-unknown-linux-gnu'; rustupSha256='34392b53a25c56435b411d3e575b63aab962034dd1409ba405e708610c829607' ;;         *) echo >&2 \"unsupported architecture: ${dpkgArch}\"; exit 1 ;;     esac;     url=\"https://static.rust-lang.org/rustup/archive/1.25.2/${rustArch}/rustup-init\";     wget \"$url\";     echo \"${rustupSha256} *rustup-init\" | sha256sum -c -;     chmod +x rustup-init;     ./rustup-init -y --no-modify-path --profile minimal --default-toolchain $RUST_VERSION --default-host ${rustArch};     rm rustup-init;     chmod -R a+w $RUSTUP_HOME $CARGO_HOME;     rustup --version;     cargo --version;     rustc --version;"
-            }
-        ]
-    },
-    {
         "name": "storm",
         "namespace": "library",
         "repository_type": "image",
@@ -812,6 +695,104 @@
                 "digest": "sha256:f47345282e4f30bb7633368c1dc467dedf1068026e0d55716728304b9a167ac3",
                 "size": 237.1596794128418,
                 "instruction": "/bin/sh -c set -xe \t&& OTP_DOWNLOAD_URL=\"https://github.com/erlang/otp/archive/OTP-${OTP_VERSION}.tar.gz\" \t&& OTP_DOWNLOAD_SHA256=\"29a50b17cb4bc326f01e4cbb2badb6a31ec586525f7c2f29166a0c6229b53f24\" \t&& runtimeDeps='libodbc1 \t\t\tlibsctp1 \t\t\tlibwxgtk3.0 \t\t\tlibwxgtk-webview3.0-gtk3-0v5' \t&& buildDeps='unixodbc-dev \t\t\tlibsctp-dev \t\t\tlibwxgtk-webview3.0-gtk3-dev' \t&& apt-get update \t&& apt-get install -y --no-install-recommends $runtimeDeps \t&& apt-get install -y --no-install-recommends $buildDeps \t&& curl -fSL -o otp-src.tar.gz \"$OTP_DOWNLOAD_URL\" \t&& echo \"$OTP_DOWNLOAD_SHA256  otp-src.tar.gz\" | sha256sum -c - \t&& export ERL_TOP=\"/usr/src/otp_src_${OTP_VERSION%%@*}\" \t&& mkdir -vp $ERL_TOP \t&& tar -xzf otp-src.tar.gz -C $ERL_TOP --strip-components=1 \t&& rm otp-src.tar.gz \t&& ( cd $ERL_TOP \t  && ./otp_build autoconf \t  && gnuArch=\"$(dpkg-architecture --query DEB_HOST_GNU_TYPE)\" \t  && ./configure --build=\"$gnuArch\" \t  && make -j$(nproc) \t  && make -j$(nproc) docs DOC_TARGETS=chunks \t  && make install install-docs DOC_TARGETS=chunks ) \t&& find /usr/local -name examples | xargs rm -rf \t&& apt-get purge -y --auto-remove $buildDeps \t&& rm -rf $ERL_TOP /var/lib/apt/lists/*"
+            }
+        ]
+    },
+    {
+        "name": "ibmjava",
+        "namespace": "library",
+        "repository_type": "image",
+        "status": 1,
+        "status_description": "active",
+        "description": "Official IBM\u00ae SDK, Java\u2122 Technology Edition Docker Image.",
+        "is_private": false,
+        "star_count": 115,
+        "pull_count": 12578072,
+        "last_updated": "2023-05-04T14:35:30.342806Z",
+        "date_registered": "2016-08-10T18:39:32.348296Z",
+        "affiliation": "",
+        "media_types": [
+            "application/vnd.docker.container.image.v1+json",
+            "application/vnd.docker.distribution.manifest.list.v2+json"
+        ],
+        "content_types": [
+            "image"
+        ],
+        "digest": "sha256:8ebb0b618344ebb2883fb4baf499585fd2c45574c48b1932ae3b748f5b1ebf05",
+        "architecture": "amd64",
+        "os": "linux",
+        "os_version": null,
+        "last_pulled": "2023-05-31T18:53:54.531125Z",
+        "last_pushed": "2023-05-04T08:01:15.683166Z",
+        "size": 158.05236911773682,
+        "layers": [
+            {
+                "digest": "sha256:1bc677758ad7fa4503417ae5be18809c5a8679b5b36fcd1464d5a8e41cb13305",
+                "size": 29.020519256591797,
+                "instruction": "ADD file:2fc6364d149eccc7f94ead482a0dcf24b0e44cc0d00ac6a2c1797776153e9608 in / "
+            },
+            {
+                "digest": "sha256:4bee7fd4007af244555d448c1fb80ceb220cf70203647e0705bbdd49468c13e4",
+                "size": 1.3793582916259766,
+                "instruction": "/bin/sh -c apt-get update     && apt-get install -y --no-install-recommends wget ca-certificates     && rm -rf /var/lib/apt/lists/*"
+            },
+            {
+                "digest": "sha256:497fe82b0d5da8b440c5da09d2e803344e57e5bdf8e8fe81bf9b838fba8ce704",
+                "size": 127.65249156951904,
+                "instruction": "/bin/sh -c set -eux;     ARCH=\"$(dpkg --print-architecture)\";     case \"${ARCH}\" in        amd64|x86_64)          ESUM='39cf0ebeda2461c0ee81636d745643713a37863d729784c46a48b4eded4717fb';          YML_FILE='8.0/jre/linux/x86_64/index.yml';          ;;        ppc64el|ppc64le)          ESUM='bef3e93e4b1025e8350492fed0f6a5a743a2d35fbacdb7820cc539d24c891a4e';          YML_FILE='8.0/jre/linux/ppc64le/index.yml';          ;;        s390)          ESUM='87d22ee3d2e20faa9854044aa46bf6be5d39f8ceb9ccf91574c7518f2535dfcb';          YML_FILE='8.0/jre/linux/s390/index.yml';          ;;        s390x)          ESUM='227ada7516542c170a920bc78a416c1dc492cba4321a23f42bd7e640ddc890e5';          YML_FILE='8.0/jre/linux/s390x/index.yml';          ;;        *)          echo \"Unsupported arch: ${ARCH}\";          exit 1;          ;;     esac;     BASE_URL=\"https://public.dhe.ibm.com/ibmdl/export/pub/systems/cloud/runtimes/java/meta/\";     wget -q -U UA_IBM_JAVA_Docker -O /tmp/index.yml ${BASE_URL}/${YML_FILE};     JAVA_URL=$(sed -n '/^'${JAVA_VERSION}:'/{n;s/\\s*uri:\\s//p}'< /tmp/index.yml);     wget -q -U UA_IBM_JAVA_Docker -O /tmp/ibm-java.bin ${JAVA_URL};     echo \"${ESUM}  /tmp/ibm-java.bin\" | sha256sum -c -;     echo \"INSTALLER_UI=silent\" > /tmp/response.properties;     echo \"USER_INSTALL_DIR=/opt/ibm/java\" >> /tmp/response.properties;     echo \"LICENSE_ACCEPTED=TRUE\" >> /tmp/response.properties;     mkdir -p /opt/ibm;     chmod +x /tmp/ibm-java.bin;     /tmp/ibm-java.bin -i silent -f /tmp/response.properties;     rm -f /tmp/response.properties;     rm -f /tmp/index.yml;     rm -f /tmp/ibm-java.bin;"
+            }
+        ]
+    },
+    {
+        "name": "jetty",
+        "namespace": "library",
+        "repository_type": "image",
+        "status": 1,
+        "status_description": "active",
+        "description": "Jetty provides a Web server and javax.servlet container.",
+        "is_private": false,
+        "star_count": 399,
+        "pull_count": 37299260,
+        "last_updated": "2023-05-25T00:38:54.782935Z",
+        "date_registered": "2015-02-09T20:10:40.435907Z",
+        "affiliation": "",
+        "media_types": [
+            "application/octet-stream",
+            "application/vnd.docker.container.image.v1+json",
+            "application/vnd.docker.distribution.manifest.list.v2+json",
+            "application/vnd.docker.distribution.manifest.v1+prettyjws"
+        ],
+        "content_types": [
+            "unrecognized",
+            "image"
+        ],
+        "digest": "sha256:8dec5ff4b808a67e61a2b1cdf8e12e3c21a8cebf0606e995e7b6843e2766bf32",
+        "architecture": "amd64",
+        "os": "linux",
+        "os_version": null,
+        "last_pulled": "2023-05-31T19:08:51.161556Z",
+        "last_pushed": "2023-05-10T01:08:01.621893Z",
+        "size": 244.1857271194458,
+        "layers": [
+            {
+                "digest": "sha256:99803d4b97f3db529ae9ca4174b0951afac6b309e7deaa8ec3214c584e02b3a8",
+                "size": 27.25464153289795,
+                "instruction": "ADD file:d05d1c0936b046937bd5755876db2f8da3ed8ccbcf464bb56c312fbc7ed78589 in / "
+            },
+            {
+                "digest": "sha256:b493027a1bf3e6a19b932ebe3c6dbfe19dc6a4583dfe39282977a57c89b31e87",
+                "size": 19.165839195251465,
+                "instruction": "/bin/sh -c apt-get update     && DEBIAN_FRONTEND=noninteractive apt-get install -y --no-install-recommends tzdata curl wget ca-certificates fontconfig locales binutils     && echo \"en_US.UTF-8 UTF-8\" >> /etc/locale.gen     && locale-gen en_US.UTF-8     && rm -rf /var/lib/apt/lists/*"
+            },
+            {
+                "digest": "sha256:c6dd141d5c93b23da5b6e10fce51a3b7c13bfa38011957619ae7ad2c3304f7e9",
+                "size": 183.66610527038574,
+                "instruction": "/bin/sh -c set -eux;     ARCH=\"$(dpkg --print-architecture)\";     case \"${ARCH}\" in        aarch64|arm64)          ESUM='0084272404b89442871e0a1f112779844090532978ad4d4191b8d03fc6adfade';          BINARY_URL='https://github.com/adoptium/temurin17-binaries/releases/download/jdk-17.0.7%2B7/OpenJDK17U-jdk_aarch64_linux_hotspot_17.0.7_7.tar.gz';          ;;        armhf|arm)          ESUM='e7a84c3e59704588510d7e6cce1f732f397b54a3b558c521912a18a1b4d0abdc';          BINARY_URL='https://github.com/adoptium/temurin17-binaries/releases/download/jdk-17.0.7%2B7/OpenJDK17U-jdk_arm_linux_hotspot_17.0.7_7.tar.gz';          ;;        ppc64el|powerpc:common64)          ESUM='8f4366ff1eddb548b1744cd82a1a56ceee60abebbcbad446bfb3ead7ac0f0f85';          BINARY_URL='https://github.com/adoptium/temurin17-binaries/releases/download/jdk-17.0.7%2B7/OpenJDK17U-jdk_ppc64le_linux_hotspot_17.0.7_7.tar.gz';          ;;        s390x|s390:64-bit)          ESUM='2d75540ae922d0c4162729267a8c741e2414881a468fd2ce4140b4069ba47ca9';          BINARY_URL='https://github.com/adoptium/temurin17-binaries/releases/download/jdk-17.0.7%2B7/OpenJDK17U-jdk_s390x_linux_hotspot_17.0.7_7.tar.gz';          ;;        amd64|i386:x86-64)          ESUM='e9458b38e97358850902c2936a1bb5f35f6cffc59da9fcd28c63eab8dbbfbc3b';          BINARY_URL='https://github.com/adoptium/temurin17-binaries/releases/download/jdk-17.0.7%2B7/OpenJDK17U-jdk_x64_linux_hotspot_17.0.7_7.tar.gz';          ;;        *)          echo \"Unsupported arch: ${ARCH}\";          exit 1;          ;;     esac; \t  wget -O /tmp/openjdk.tar.gz ${BINARY_URL}; \t  echo \"${ESUM} */tmp/openjdk.tar.gz\" | sha256sum -c -; \t  mkdir -p \"$JAVA_HOME\"; \t  tar --extract \t      --file /tmp/openjdk.tar.gz \t      --directory \"$JAVA_HOME\" \t      --strip-components 1 \t      --no-same-owner \t  ;     rm -f /tmp/openjdk.tar.gz ${JAVA_HOME}/src.zip;     find \"$JAVA_HOME/lib\" -name '*.so' -exec dirname '{}' ';' | sort -u > /etc/ld.so.conf.d/docker-openjdk.conf;     ldconfig;     java -Xshare:dump;"
+            },
+            {
+                "digest": "sha256:86262e303728a42ffb0027f6aba0c332c3d8c54610bb4e446203c86c7b39243d",
+                "size": 14.09743595123291,
+                "instruction": "/bin/sh -c set -xe ; \texport savedAptMark=\"$(apt-mark showmanual)\" ; \tmkdir -p $TMPDIR ; \tapt-get update ; \tapt-get install -y --no-install-recommends \t\tca-certificates \t\tp11-kit \t\tgnupg \t\tcurl \t\t; \texport GNUPGHOME=/jetty-keys ; \tmkdir -p \"$GNUPGHOME\" ; \tfor key in $JETTY_GPG_KEYS; do \t\tgpg --batch --keyserver \"hkps://keyserver.ubuntu.com\" --recv-keys \"$key\"; \tdone ; \tmkdir -p \"$JETTY_HOME\" ; \tcd $JETTY_HOME ; \tcurl -SL \"$JETTY_TGZ_URL\" -o jetty.tar.gz ; \tcurl -SL \"$JETTY_TGZ_URL.asc\" -o jetty.tar.gz.asc ; \tgpg --batch --verify jetty.tar.gz.asc jetty.tar.gz ; \ttar -xvf jetty.tar.gz --strip-components=1 ; \tsed -i '/jetty-logging/d' etc/jetty.conf ; \tmkdir -p \"$JETTY_BASE\" ; \tcd $JETTY_BASE ; \tjava -jar \"$JETTY_HOME/start.jar\" --create-startd \t\t--add-to-start=\"server,http,deploy,jsp,jstl,ext,resources,websocket\" ; \tgroupadd -r jetty && useradd -r -g jetty jetty ; \tchown -R jetty:jetty \"$JETTY_HOME\" \"$JETTY_BASE\" \"$TMPDIR\" ; \tusermod -d $JETTY_BASE jetty ; \tapt-mark auto '.*' > /dev/null ; \t[ -z \"$savedAptMark\" ] || apt-mark manual $savedAptMark > /dev/null ; \tapt-get purge -y --auto-remove -o APT::AutoRemove::RecommendsImportant=false ; \trm -rf /var/lib/apt/lists/* ; \trm -rf /tmp/hsperfdata_root ; \trm -fr $JETTY_HOME/jetty.tar.gz* ; \trm -fr /jetty-keys $GNUPGHOME ; \trm -rf /tmp/hsperfdata_root ; \tjava -jar \"$JETTY_HOME/start.jar\" --list-config ;"
             }
         ]
     }

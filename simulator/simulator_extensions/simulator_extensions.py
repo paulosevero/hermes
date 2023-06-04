@@ -11,7 +11,15 @@ import json
 import msgpack
 
 
-CONDENSED_METRICS = True
+ALGORITHMS_THAT_DISPLAY_METRICS_DURING_SIMULATION = ["hermes", "hermes_v3", "lamp", "salus", "greedy_least_batch"]
+VERBOSE_METRICS_TO_HIDE = [
+    "wait_times",
+    "pulling_times",
+    "state_migration_times",
+    "sizes_of_cached_layers",
+    "sizes_of_uncached_layers",
+    "migration_times",
+]
 
 
 def immobile(user: object):
@@ -152,6 +160,12 @@ def simulator_run_model(self):
         self.monitor()
         if self.executed_resource_management_algorithm:
             collect_simulation_metrics(simulator=self)
+            if self.resource_management_algorithm.__name__ in ALGORITHMS_THAT_DISPLAY_METRICS_DURING_SIMULATION:
+                print(f"\n=== BATCH {self.maintenance_batches} METRICS ===")
+                per_batch_metrics = self.model_metrics["per_batch"]
+                for key, value in per_batch_metrics.items():
+                    print(f"{key}: {value}")
+                print("=========================================================================")
 
         # Checks if the simulation should end according to the stop condition
         self.running = False if self.stopping_criterion(self) else True
@@ -310,6 +324,9 @@ def collect_simulation_metrics(simulator: object):
         updated_cpu_capacity_per_batch = 0
         updated_ram_capacity_per_batch = 0
         updated_disk_capacity_per_batch = 0
+        updated_cpu_capacity_available_per_batch = 0
+        updated_ram_capacity_available_per_batch = 0
+        updated_disk_capacity_available_per_batch = 0
         outdated_cpu_capacity_per_batch = 0
         outdated_ram_capacity_per_batch = 0
         outdated_disk_capacity_per_batch = 0
@@ -361,6 +378,10 @@ def collect_simulation_metrics(simulator: object):
                 updated_cpu_capacity_per_batch += edge_server.cpu
                 updated_ram_capacity_per_batch += edge_server.memory
                 updated_disk_capacity_per_batch += edge_server.disk
+                updated_cpu_capacity_available_per_batch += edge_server.cpu - edge_server.cpu_demand
+                updated_ram_capacity_available_per_batch += edge_server.memory - edge_server.memory_demand
+                updated_disk_capacity_available_per_batch += edge_server.disk - edge_server.disk_demand
+
             else:
                 outdated_cpu_capacity_per_batch += edge_server.cpu
                 outdated_ram_capacity_per_batch += edge_server.memory
@@ -377,6 +398,9 @@ def collect_simulation_metrics(simulator: object):
                     "updated_cpu_capacity_per_batch": [],
                     "updated_ram_capacity_per_batch": [],
                     "updated_disk_capacity_per_batch": [],
+                    "updated_cpu_capacity_available_per_batch": [],
+                    "updated_ram_capacity_available_per_batch": [],
+                    "updated_disk_capacity_available_per_batch": [],
                     "outdated_cpu_capacity_per_batch": [],
                     "outdated_ram_capacity_per_batch": [],
                     "outdated_disk_capacity_per_batch": [],
@@ -388,6 +412,17 @@ def collect_simulation_metrics(simulator: object):
             simulator.model_metrics["per_batch"]["updated_cpu_capacity_per_batch"].append(updated_cpu_capacity_per_batch)
             simulator.model_metrics["per_batch"]["updated_ram_capacity_per_batch"].append(updated_ram_capacity_per_batch)
             simulator.model_metrics["per_batch"]["updated_disk_capacity_per_batch"].append(updated_disk_capacity_per_batch)
+
+            simulator.model_metrics["per_batch"]["updated_cpu_capacity_available_per_batch"].append(
+                updated_cpu_capacity_available_per_batch
+            )
+            simulator.model_metrics["per_batch"]["updated_ram_capacity_available_per_batch"].append(
+                updated_ram_capacity_available_per_batch
+            )
+            simulator.model_metrics["per_batch"]["updated_disk_capacity_available_per_batch"].append(
+                updated_disk_capacity_available_per_batch
+            )
+
             simulator.model_metrics["per_batch"]["outdated_cpu_capacity_per_batch"].append(outdated_cpu_capacity_per_batch)
             simulator.model_metrics["per_batch"]["outdated_ram_capacity_per_batch"].append(outdated_ram_capacity_per_batch)
             simulator.model_metrics["per_batch"]["outdated_disk_capacity_per_batch"].append(outdated_disk_capacity_per_batch)
@@ -403,6 +438,17 @@ def collect_simulation_metrics(simulator: object):
             simulator.model_metrics["per_batch"]["updated_cpu_capacity_per_batch"][-1] = updated_cpu_capacity_per_batch
             simulator.model_metrics["per_batch"]["updated_ram_capacity_per_batch"][-1] = updated_ram_capacity_per_batch
             simulator.model_metrics["per_batch"]["updated_disk_capacity_per_batch"][-1] = updated_disk_capacity_per_batch
+
+            simulator.model_metrics["per_batch"]["updated_cpu_capacity_available_per_batch"][
+                -1
+            ] = updated_cpu_capacity_available_per_batch
+            simulator.model_metrics["per_batch"]["updated_ram_capacity_available_per_batch"][
+                -1
+            ] = updated_ram_capacity_available_per_batch
+            simulator.model_metrics["per_batch"]["updated_disk_capacity_available_per_batch"][
+                -1
+            ] = updated_disk_capacity_available_per_batch
+
             simulator.model_metrics["per_batch"]["outdated_cpu_capacity_per_batch"][-1] = outdated_cpu_capacity_per_batch
             simulator.model_metrics["per_batch"]["outdated_ram_capacity_per_batch"][-1] = outdated_ram_capacity_per_batch
             simulator.model_metrics["per_batch"]["outdated_disk_capacity_per_batch"][-1] = outdated_disk_capacity_per_batch

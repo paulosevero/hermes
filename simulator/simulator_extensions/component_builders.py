@@ -382,11 +382,9 @@ class EdgeServerBuilder:
         component_instance.coordinates = component_instance.attributes["coordinates"]
         component_instance.max_concurrent_layer_downloads = component_instance.attributes["max_concurrent_layer_downloads"]
         component_instance.active = component_instance.attributes["active"]
-        component_instance.power_model_parameters = component_instance.attributes["power_model_parameters"]
         component_instance.patch_time = component_instance.attributes["patch_time"]
         component_instance.status = component_instance.attributes["status"]
         component_instance.patching_log = component_instance.attributes["patching_log"]
-        component_instance.mips = component_instance.attributes["mips"]
 
         if PRINT_METADATA:
             metadata = {
@@ -402,11 +400,9 @@ class EdgeServerBuilder:
                 "coordinates": component_instance.coordinates,
                 "max_concurrent_layer_downloads": component_instance.max_concurrent_layer_downloads,
                 "active": component_instance.active,
-                "power_model_parameters": component_instance.power_model_parameters,
                 "patch_time": component_instance.patch_time,
                 "status": component_instance.status,
                 "patching_log": component_instance.patching_log,
-                "mips": component_instance.mips,
             }
             print(metadata)
 
@@ -414,7 +410,6 @@ class EdgeServerBuilder:
 
     @classmethod
     def create_relationships(cls, component_instance):
-        component_instance.power_model = create_relationship_callable(component_instance.relationships["power_model"])
         component_instance.base_station = create_relationship_single_component_instance(
             component_instance.relationships["base_station"]
         )
@@ -435,7 +430,6 @@ class EdgeServerBuilder:
         if PRINT_METADATA:
             metadata = {
                 "object": component_instance,
-                "power_model": component_instance.power_model,
                 "base_station": component_instance.base_station,
                 "network_switch": component_instance.network_switch,
                 "services": component_instance.services,

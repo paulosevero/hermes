@@ -27,14 +27,11 @@ def edge_server_to_dict(self) -> dict:
             "coordinates": self.coordinates,
             "max_concurrent_layer_downloads": self.max_concurrent_layer_downloads,
             "active": self.active,
-            "power_model_parameters": self.power_model_parameters,
             "patch_time": self.patch_time,
             "status": self.status,
             "patching_log": self.patching_log,
-            "mips": self.mips,
         },
         "relationships": {
-            "power_model": self.power_model.__name__ if self.power_model else None,
             "base_station": {"class": type(self.base_station).__name__, "id": self.base_station.id} if self.base_station else None,
             "network_switch": {"class": type(self.network_switch).__name__, "id": self.network_switch.id}
             if self.network_switch
@@ -72,9 +69,7 @@ def edge_server_collect(self) -> dict:
         "Download Queue": [f.metadata["object"].instruction for f in self.download_queue],
         "Waiting Queue": [layer.instruction for layer in self.waiting_queue],
         "Max. Concurrent Layer Downloads": self.max_concurrent_layer_downloads,
-        "Power Consumption": self.get_power_consumption(),
         "Patch Time": self.patch_time,
-        "MIPS": self.mips,
         "Status": self.status,
         "Patching Log": self.patching_log,
     }

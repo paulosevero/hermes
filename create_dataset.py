@@ -12,11 +12,62 @@ from random import seed, sample
 import json
 
 
+def randomized_closest_fit():
+    services = sample(Service.all(), Service.count())
+    for service in services:
+        app = service.application
+        user = app.users[0]
+        user_switch = user.base_station.network_switch
+
+        edge_servers = []
+        for edge_server in EdgeServer.all():
+            path = nx.shortest_path(G=Topology.first(), source=user_switch, target=edge_server.network_switch, weight="delay")
+            delay = Topology.first().calculate_path_delay(path=path)
+            edge_servers.append(
+                {
+                    "object": edge_server,
+                    "path": path,
+                    "delay": delay,
+                }
+            )
+
+        edge_servers = sorted(edge_servers, key=lambda edge_server_metadata: edge_server_metadata["delay"])
+
+        for edge_server_metadata in edge_servers:
+            edge_server = edge_server_metadata["object"]
+
+            # Checking if the host would have resources to host the service and its (additional) layers
+            if edge_server.has_capacity_to_host(service=service):
+                # Updating the host's resource usage
+                edge_server.cpu_demand += service.cpu_demand
+                edge_server.memory_demand += service.memory_demand
+
+                # Creating relationship between the host and the registry
+                service.server = edge_server
+                edge_server.services.append(service)
+
+                for layer_metadata in edge_server._get_uncached_layers(service=service):
+                    layer = ContainerLayer(
+                        digest=layer_metadata.digest,
+                        size=layer_metadata.size,
+                        instruction=layer_metadata.instruction,
+                    )
+
+                    # Updating host's resource usage based on the layer size
+                    edge_server.disk_demand += layer.size
+
+                    # Creating relationship between the host and the layer
+                    layer.server = edge_server
+                    edge_server.container_layers.append(layer)
+
+                break
+
+
 # Defining a seed value to enable reproducibility
 seed(1)
 
 # Creating list of map coordinates
-map_coordinates = hexagonal_grid(x_size=10, y_size=10)
+map_coordinates = hexagonal_grid(x_size=8, y_size=8)
 
 SERVERS_PER_SPEC = 10
 SERVER_PATCH_TIME = 180
@@ -25,73 +76,21 @@ edge_server_specifications = [
         "number_of_objects": SERVERS_PER_SPEC,
         "model_name": "Server 1 - Dell PowerEdge R620",
         "patch_time": SERVER_PATCH_TIME,
-        "mips": 1450,
         "cpu": 16,
         "memory": 24,
         "disk": 131072,  # 128 GB
         "static_power_percentage": 54.1 / 243,
         "max_power_consumption": 243,
-        "known_power_values": [
-            (0, 54.1),
-            (10, 78.4),
-            (20, 88.5),
-            (30, 99.5),
-            (40, 115),
-            (50, 126),
-            (60, 143),
-            (70, 165),
-            (80, 196),
-            (90, 226),
-            (100, 243),
-        ],
     },
     {
         "number_of_objects": SERVERS_PER_SPEC,
-        "model_name": "Server 2 - Acer AR585 F1",
+        "model_name": "Server 2 - SGI Rackable C2112-4G10",
         "patch_time": SERVER_PATCH_TIME,
-        "mips": 3500,
-        "cpu": 48,
-        "memory": 64,
-        "disk": 131072,  # 128 GB
-        "static_power_percentage": 127 / 559,
-        "max_power_consumption": 559,
-        "known_power_values": [
-            (0, 127),
-            (10, 220),
-            (20, 254),
-            (30, 293),
-            (40, 339),
-            (50, 386),
-            (60, 428),
-            (70, 463),
-            (80, 497),
-            (90, 530),
-            (100, 559),
-        ],
-    },
-    {
-        "number_of_objects": SERVERS_PER_SPEC,
-        "model_name": "Server 3 - SGI Rackable C2112-4G10",
-        "patch_time": SERVER_PATCH_TIME,
-        "mips": 2750,
         "cpu": 32,
         "memory": 32,
         "disk": 131072,  # 128 GB
         "static_power_percentage": 265 / 1387,
         "max_power_consumption": 1387,
-        "known_power_values": [
-            (0, 265),
-            (10, 531),
-            (20, 624),
-            (30, 718),
-            (40, 825),
-            (50, 943),
-            (60, 1060),
-            (70, 1158),
-            (80, 1239),
-            (90, 1316),
-            (100, 1387),
-        ],
     },
 ]
 
@@ -110,7 +109,7 @@ for coordinates_id, coordinates in enumerate(map_coordinates):
 partially_connected_hexagonal_mesh(
     network_nodes=NetworkSwitch.all(),
     link_specifications=[
-        {"number_of_objects": 261, "delay": 3, "bandwidth": 12.5},
+        {"number_of_objects": 161, "delay": 3, "bandwidth": 12.5},
     ],
 )
 
@@ -126,7 +125,6 @@ for spec in edge_server_specifications:
         edge_server.cpu = spec["cpu"]
         edge_server.memory = spec["memory"]
         edge_server.disk = spec["disk"]
-        edge_server.mips = spec["mips"]
         edge_server.patch_time = spec["patch_time"]
         edge_server.status = "outdated"
         edge_server.patching_log = {
@@ -137,7 +135,6 @@ for spec in edge_server_specifications:
         # Power-related attributes
         edge_server.power_model = LinearServerPowerModel
         edge_server.power_model_parameters = {
-            "known_power_values": spec["known_power_values"],
             "static_power_percentage": spec["static_power_percentage"],
             "max_power_consumption": spec["max_power_consumption"],
         }
@@ -148,7 +145,7 @@ for spec in edge_server_specifications:
 
 
 # Manually creating an edge server that will be fully occupied by the container registry
-CONTAINER_REGISTRY_BASE_STATION = 55
+CONTAINER_REGISTRY_BASE_STATION = 37
 registry_host_spec = edge_server_specifications[0]
 edge_server = EdgeServer()
 edge_server.model_name = registry_host_spec["model_name"]
@@ -157,20 +154,11 @@ edge_server.model_name = registry_host_spec["model_name"]
 edge_server.cpu = registry_host_spec["cpu"]
 edge_server.memory = registry_host_spec["memory"]
 edge_server.disk = registry_host_spec["disk"]
-edge_server.mips = registry_host_spec["mips"]
 edge_server.patch_time = registry_host_spec["patch_time"]
 edge_server.status = "updated"
 edge_server.patching_log = {
     "started_at": 0,
     "finished_at": 0,
-}
-
-# Power-related attributes
-edge_server.power_model = LinearServerPowerModel
-edge_server.power_model_parameters = {
-    "known_power_values": registry_host_spec["known_power_values"],
-    "static_power_percentage": registry_host_spec["static_power_percentage"],
-    "max_power_consumption": registry_host_spec["max_power_consumption"],
 }
 
 # Connecting the edge server to a random base station that has no edge server connected to it yet
@@ -235,9 +223,10 @@ provision_container_registry(container_registry_specification=container_registri
 # Technical specification (ts), 3rd Generation Partnership Project (3GPP), 2022, 72p.
 delay_slas = [15, 20, 30]
 service_demands = [
+    {"cpu_demand": 1, "memory_demand": 1},
     {"cpu_demand": 2, "memory_demand": 2},
     {"cpu_demand": 4, "memory_demand": 4},
-    {"cpu_demand": 8, "memory_demand": 8},
+    {"cpu_demand": 6, "memory_demand": 6},
 ]
 
 # Defining service image specifications
@@ -246,10 +235,10 @@ service_image_specifications = [
     {"state": 0, "image_name": "ros"},
     {"state": 0, "image_name": "debian"},
     {"state": 0, "image_name": "ruby"},
-    {"state": 0, "image_name": "rust"},
-    {"state": 0, "image_name": "python"},
     {"state": 0, "image_name": "erlang"},
-    {"state": 0, "image_name": "elixir"},
+    {"state": 0, "image_name": "python"},
+    {"state": 0, "image_name": "ibmjava"},
+    {"state": 0, "image_name": "jetty"},
     {"state": 250, "image_name": "telegraf"},
     {"state": 0, "image_name": "storm"},
     {"state": 0, "image_name": "node"},
@@ -258,7 +247,7 @@ service_image_specifications = [
     {"state": 250, "image_name": "redis"},
     {"state": 250, "image_name": "mongo"},
 ]
-SERVICES_PER_SPEC = 6
+SERVICES_PER_SPEC = 4
 TOTAL_SERVICES = len(service_image_specifications) * SERVICES_PER_SPEC
 service_image_specification_values = uniform(n_items=TOTAL_SERVICES, valid_values=service_image_specifications)
 
@@ -320,7 +309,7 @@ for index, service in enumerate(services_sorted_randomly):
     service.being_provisioned = False
 
 # Defining the inicial service placement
-random_fit_services()
+randomized_closest_fit()
 
 # Calculating user communication paths and application delays
 for user in User.all():
@@ -387,6 +376,7 @@ print("\n\n")
 print("=================================================================")
 print("==== NETWORK DISTANCE (DELAY) BETWEEN USERS AND EDGE SERVERS ====")
 print("=================================================================")
+users = sorted(users, key=lambda user_metadata: user_metadata["object"].delay_slas[str(user_metadata["object"].applications[0].id)])
 for user_metadata in users:
     user_attrs = {
         "object": user_metadata["object"],

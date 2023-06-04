@@ -21,9 +21,7 @@ def hermes_can_host_services(servers: list, services: list) -> bool:
     # Checking if all services could be hosted by the list of servers
     for service in services:
         # Sorting servers
-        sorted_list_of_servers = sort_candidate_servers(
-            service=service, server_being_drained=service.server, candidate_servers=servers
-        )
+        sorted_list_of_servers = sort_candidate_servers(service=service, candidate_servers=servers)
         for server in sorted_list_of_servers:
             # We assume that the disk demand is negligible based on the average size of container images and current server capacities
             if has_capacity_to_host(server=server, service=service):
@@ -95,9 +93,10 @@ def sort_servers_to_drain() -> list:
     => CONSIDERED CRITERIA ===
     ==========================
         -> Servers with a larger capacity
+        -> Servers with lower CPU/RAM demand
+        -> Servers hosting stateless services
         -> Servers with a larger amount of popular layers in their cache
             -> Layer Size + Number of services using that layer that are hosted by third-party outdated servers
-        -> Servers hosting stateless services
 
     Returns:
         servers_to_drain (list): Sorted list of outdated servers to be drained.
@@ -106,6 +105,16 @@ def sort_servers_to_drain() -> list:
 
     # Collecting relevant metadata from outdated servers
     for server in [server for server in EdgeServer.all() if server.status == "outdated"]:
+        #########################
+        #### SERVER CAPACITY ####
+        #########################
+        normalized_server_capacity = get_normalized_capacity(object=server)
+
+        #######################
+        #### SERVER DEMAND ####
+        #######################
+        normalized_server_demand = get_normalized_demand(object=server)
+
         ###################################################
         #### AGGREGATED STATE SIZE FROM HOSTED SERVERS ####
         ###################################################
@@ -135,12 +144,19 @@ def sort_servers_to_drain() -> list:
             layers_to_analyze=layers, services_of_interest=services_hosted_by_other_outdated_servers
         )
 
+        ################################
+        #### SLA OF HOSTED SERVICES ####
+        ################################
+        slas_of_hosted_services = [get_service_delay_sla(service=service) for service in server.services]
+
         # Consolidating the server metadata
         server_metadata = {
             "object": server,
-            "capacity": get_normalized_capacity(object=server),
-            "cache_relevance": cache_relevance,
+            "capacity": normalized_server_capacity,
+            "inversed_demand": 1 / max(1, normalized_server_demand),
             "inversed_service_states": 1 / max(1, aggregated_size_of_service_states),
+            "cache_relevance": cache_relevance,
+            "slas_of_hosted_services": 1 / (sum(slas_of_hosted_services) / len(slas_of_hosted_services)),
         }
 
         servers_to_drain.append(server_metadata)
@@ -154,9 +170,9 @@ def sort_servers_to_drain() -> list:
             min=min_and_max["minimum"],
             max=min_and_max["maximum"],
         )
-        server_metadata["norm_cache_relevance"] = get_norm(
+        server_metadata["norm_inversed_demand"] = get_norm(
             metadata=server_metadata,
-            attr_name="cache_relevance",
+            attr_name="inversed_demand",
             min=min_and_max["minimum"],
             max=min_and_max["maximum"],
         )
@@ -166,10 +182,26 @@ def sort_servers_to_drain() -> list:
             min=min_and_max["minimum"],
             max=min_and_max["maximum"],
         )
+        server_metadata["norm_cache_relevance"] = get_norm(
+            metadata=server_metadata,
+            attr_name="cache_relevance",
+            min=min_and_max["minimum"],
+            max=min_and_max["maximum"],
+        )
+        server_metadata["norm_slas_of_hosted_services"] = get_norm(
+            metadata=server_metadata,
+            attr_name="slas_of_hosted_services",
+            min=min_and_max["minimum"],
+            max=min_and_max["maximum"],
+        )
 
     servers_to_drain = sorted(
         servers_to_drain,
-        key=lambda server: server["norm_capacity"] + server["norm_cache_relevance"] + server["norm_inversed_service_states"],
+        key=lambda server: server["norm_capacity"]
+        + server["norm_inversed_demand"]
+        + server["norm_cache_relevance"]
+        + server["norm_slas_of_hosted_services"],
+        # + server["norm_inversed_service_states"],
         reverse=True,
     )
 
@@ -219,14 +251,14 @@ def sort_services_to_relocate(server: object) -> list:
         ########################
         #### SERVICE DEMAND ####
         ########################
-        inversed_service_demand = 1 / get_normalized_demand(object=service)
+        service_demand = get_normalized_demand(object=service)
 
         # Consolidating the service metadata
         service_metadata = {
             "object": service,
             "inversed_delay_sla": inversed_delay_sla,
             "cache_relevance": cache_relevance,
-            "inversed_service_demand": inversed_service_demand,
+            "inversed_service_demand": 1 / service_demand,
         }
 
         services_to_relocate.append(service_metadata)
@@ -265,7 +297,7 @@ def sort_services_to_relocate(server: object) -> list:
     return services_to_relocate
 
 
-def sort_candidate_servers(service: object, server_being_drained: object, candidate_servers: list) -> list:
+def sort_candidate_servers(service: object, candidate_servers: list) -> list:
     """Defines the order of candidate servers for hosting a service from a given server being drained.
 
     ==========================
@@ -274,6 +306,7 @@ def sort_candidate_servers(service: object, server_being_drained: object, candid
         -> 1. Servers already updated
         -> 2. Servers close enough to the user to avoid SLA violation
         -> 3. Servers with a larger amount of cached data from layers
+        -> 4. Servers downloading the least amount of layers
 
     Args:
         service (object): Service to be relocated.
@@ -319,12 +352,18 @@ def sort_candidate_servers(service: object, server_being_drained: object, candid
             if any(cached_layer.digest == service_layer.digest for service_layer in service_layers):
                 amount_of_cached_layers += cached_layer.size
 
+        ##########################
+        #### LAYER QUEUE SIZE ####
+        ##########################
+        layer_queue = len(server.waiting_queue) + len(server.download_queue)
+
         # Consolidating the metadata of the candidate server
         candidate_server_metadata = {
             "object": server,
             "update_status": update_status,
             "avoids_sla_violation": avoids_sla_violation,
             "amount_of_cached_layers": amount_of_cached_layers,
+            "inversed_layer_queue": 1 / max(1, layer_queue),
         }
         sorted_candidate_servers.append(candidate_server_metadata)
 
@@ -337,10 +376,19 @@ def sort_candidate_servers(service: object, server_being_drained: object, candid
             min=min_and_max["minimum"],
             max=min_and_max["maximum"],
         )
+        server_metadata["norm_inversed_layer_queue"] = get_norm(
+            metadata=server_metadata,
+            attr_name="inversed_layer_queue",
+            min=min_and_max["minimum"],
+            max=min_and_max["maximum"],
+        )
 
     sorted_candidate_servers = sorted(
         sorted_candidate_servers,
-        key=lambda server: (server["update_status"], server["avoids_sla_violation"] + server["norm_amount_of_cached_layers"]),
+        key=lambda server: (
+            server["update_status"],
+            server["avoids_sla_violation"] + server["norm_amount_of_cached_layers"] + server["norm_inversed_layer_queue"],
+        ),
         reverse=True,
     )
 
@@ -387,9 +435,7 @@ def hermes(parameters: dict = {}):
                     service = services.pop(0)
 
                     # Sorting candidate servers to host the service
-                    candidate_servers = sort_candidate_servers(
-                        service=service, server_being_drained=server, candidate_servers=candidate_servers
-                    )
+                    candidate_servers = sort_candidate_servers(service=service, candidate_servers=candidate_servers)
 
                     for candidate_host in candidate_servers:
                         if has_capacity_to_host(server=candidate_host, service=service):

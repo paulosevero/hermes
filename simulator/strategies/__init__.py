@@ -9,5 +9,3 @@ from .nsgaii import nsgaii
 
 # Proposed maintenance strategy
 from .hermes import hermes
-from .hermes_v2 import hermes_v2
-from .hermes_v3 import hermes_v3

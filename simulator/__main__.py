@@ -42,6 +42,7 @@ def main(seed_value: int, algorithm: str, dataset: str, parameters: dict = {}):
         logs_directory=f"logs/algorithm={algorithm};{parameters_string}",
         user_defined_functions=[immobile],
     )
+    simulator.executing_nsgaii_runner = False
 
     # Loading the dataset
     simulator.initialize(input_file=dataset)
@@ -59,8 +60,32 @@ def main(seed_value: int, algorithm: str, dataset: str, parameters: dict = {}):
 
     # Displaying the simulation results
     if VERBOSE:
-        print("\n\n==== SIMULATION RESULTS ====")
-        for key, value in simulator.model_metrics.items():
+        print("\n")
+        print("============================")
+        print("============================")
+        print("==== SIMULATION RESULTS ====")
+        print("============================")
+        print("============================")
+
+        verbose_metrics_to_hide = [
+            "wait_times",
+            "pulling_times",
+            "state_migration_times",
+            "sizes_of_cached_layers",
+            "sizes_of_uncached_layers",
+            "migration_times",
+        ]
+
+        print("=== OVERALL ===")
+        overall_metrics = simulator.model_metrics["overall"]
+        for key, value in overall_metrics.items():
+            if key in verbose_metrics_to_hide:
+                continue
+            print(f"{key}: {value}")
+
+        print("\n=== PER BATCH ===")
+        per_batch_metrics = simulator.model_metrics["per_batch"]
+        for key, value in per_batch_metrics.items():
             print(f"{key}: {value}")
 
 
