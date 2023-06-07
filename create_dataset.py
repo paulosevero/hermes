@@ -28,10 +28,12 @@ def randomized_closest_fit():
                     "object": edge_server,
                     "path": path,
                     "delay": delay,
+                    "violates_sla": delay > user.delay_slas[str(service.application.id)],
+                    "free_capacity": get_normalized_capacity(object=edge_server) - get_normalized_demand(object=edge_server),
                 }
             )
 
-        edge_servers = sorted(edge_servers, key=lambda edge_server_metadata: edge_server_metadata["delay"])
+        edge_servers = sorted(edge_servers, key=lambda s: (s["violates_sla"], s["free_capacity"]))
 
         for edge_server_metadata in edge_servers:
             edge_server = edge_server_metadata["object"]
@@ -62,14 +64,29 @@ def randomized_closest_fit():
 
                 break
 
+        # Creating an instance of the service image on its host if necessary
+        if not any(hosted_image for hosted_image in service.server.container_images if hosted_image.digest == service.image_digest):
+            template_image = next((img for img in ContainerImage.all() if img.digest == service.image_digest), None)
+
+            # Creating a ContainerImage object to represent the new image
+            image = ContainerImage()
+            image.name = template_image.name
+            image.digest = template_image.digest
+            image.tag = template_image.tag
+            image.layers_digests = template_image.layers_digests
+
+            # Connecting the new image to the target host
+            image.server = service.server
+            service.server.container_images.append(image)
+
 
 # Defining a seed value to enable reproducibility
-seed(1)
+seed(0)
 
 # Creating list of map coordinates
 map_coordinates = hexagonal_grid(x_size=8, y_size=8)
 
-SERVERS_PER_SPEC = 10
+SERVERS_PER_SPEC = 6
 SERVER_PATCH_TIME = 180
 edge_server_specifications = [
     {
@@ -109,7 +126,7 @@ for coordinates_id, coordinates in enumerate(map_coordinates):
 partially_connected_hexagonal_mesh(
     network_nodes=NetworkSwitch.all(),
     link_specifications=[
-        {"number_of_objects": 161, "delay": 3, "bandwidth": 12.5},
+        {"number_of_objects": 161, "delay": 5, "bandwidth": 12.5},
     ],
 )
 
@@ -145,7 +162,7 @@ for spec in edge_server_specifications:
 
 
 # Manually creating an edge server that will be fully occupied by the container registry
-CONTAINER_REGISTRY_BASE_STATION = 37
+CONTAINER_REGISTRY_BASE_STATION = 36
 registry_host_spec = edge_server_specifications[0]
 edge_server = EdgeServer()
 edge_server.model_name = registry_host_spec["model_name"]
@@ -195,6 +212,7 @@ for container_image in container_image_specifications:
         {
             "name": container_image["name"],
             "tag": container_image["tag"],
+            "layers": container_image["layers"],
         }
     )
 
@@ -223,31 +241,31 @@ provision_container_registry(container_registry_specification=container_registri
 # Technical specification (ts), 3rd Generation Partnership Project (3GPP), 2022, 72p.
 delay_slas = [15, 20, 30]
 service_demands = [
-    {"cpu_demand": 1, "memory_demand": 1},
+    # {"cpu_demand": 1, "memory_demand": 1},
     {"cpu_demand": 2, "memory_demand": 2},
     {"cpu_demand": 4, "memory_demand": 4},
-    {"cpu_demand": 6, "memory_demand": 6},
+    {"cpu_demand": 8, "memory_demand": 8},
 ]
 
 # Defining service image specifications
 service_image_specifications = [
-    {"state": 0, "image_name": "centos"},
-    {"state": 0, "image_name": "ros"},
-    {"state": 0, "image_name": "debian"},
-    {"state": 0, "image_name": "ruby"},
-    {"state": 0, "image_name": "erlang"},
-    {"state": 0, "image_name": "python"},
-    {"state": 0, "image_name": "ibmjava"},
-    {"state": 0, "image_name": "jetty"},
-    {"state": 250, "image_name": "telegraf"},
-    {"state": 0, "image_name": "storm"},
-    {"state": 0, "image_name": "node"},
-    {"state": 0, "image_name": "tomcat"},
-    {"state": 0, "image_name": "nginx"},
-    {"state": 250, "image_name": "redis"},
-    {"state": 250, "image_name": "mongo"},
+    # {"state": 0, "image_name": "node", "layers": 8},
+    # {"state": 0, "image_name": "storm", "layers": 9},
+    # {"state": 0, "image_name": "erlang", "layers": 7},
+    {"state": 0, "image_name": "debian", "layers": 1},
+    {"state": 0, "image_name": "centos", "layers": 1},
+    # {"state": 0, "image_name": "archlinux", "layers": 1},
+    # {"state": 0, "image_name": "ibmjava", "layers": 3},
+    {"state": 0, "image_name": "nginx", "layers": 6},
+    {"state": 300, "image_name": "redis", "layers": 6},
+    # {"state": 200, "image_name": "telegraf", "layers": 6},
+    # {"state": 0, "image_name": "jetty", "layers": 6},
+    {"state": 0, "image_name": "tomcat", "layers": 7},
+    {"state": 0, "image_name": "ruby", "layers": 7},
+    {"state": 0, "image_name": "python", "layers": 7},
+    {"state": 400, "image_name": "mongo", "layers": 9},
 ]
-SERVICES_PER_SPEC = 4
+SERVICES_PER_SPEC = 3
 TOTAL_SERVICES = len(service_image_specifications) * SERVICES_PER_SPEC
 service_image_specification_values = uniform(n_items=TOTAL_SERVICES, valid_values=service_image_specifications)
 
@@ -327,6 +345,8 @@ for edge_server in EdgeServer.all():
         "capacity": [edge_server.cpu, edge_server.memory, edge_server.disk],
         "demand": [edge_server.cpu_demand, edge_server.memory_demand, edge_server.disk_demand],
         "services": [service.id for service in edge_server.services],
+        "layers": [layer.id for layer in edge_server.container_layers],
+        "images": [image.id for image in edge_server.container_images],
         "patch_time": edge_server.patch_time,
     }
     print(f"{edge_server}. {edge_server_metadata}")
@@ -349,7 +369,19 @@ for application in Application.all():
     }
     print(f"{application}. {application_metadata}")
 
+print("\n\n")
+print("==========================")
+print("==== CONTAINER ASSETS ====")
+print("==========================")
+print(f"==== CONTAINER IMAGES ({ContainerImage.count()}):")
+for container_image in ContainerImage.all():
+    print(f"\t{container_image}. Server: {container_image.server}")
 
+print("")
+
+print(f"==== CONTAINER LAYERS ({ContainerLayer.count()}):")
+for container_layer in ContainerLayer.all():
+    print(f"\t{container_layer}. Server: {container_layer.server}")
 ##########################
 #### DATASET ANALYSIS ####
 ##########################
@@ -416,6 +448,13 @@ print("============================================")
 print(f"Edge Servers: {EdgeServer.count()}")
 print(f"\tCPU Capacity: {edge_server_cpu_capacity}")
 print(f"\tRAM Capacity: {edge_server_memory_capacity}")
+
+print("")
+
+print(f"Idle Edge Servers: {sum([1 for s in EdgeServer.all() if s.cpu_demand == 0])}")
+
+print("")
+
 print(f"Services: {Service.count()}")
 print(f"\tCPU Demand: {service_cpu_demand}")
 
@@ -433,5 +472,5 @@ EdgeServer.update = edge_server_update
 EdgeServer.step = edge_server_step
 
 # Exporting scenario
-ComponentManager.export_scenario(save_to_file=True, file_name="dataset1")
+ComponentManager.export_scenario(save_to_file=True, file_name="dataset2")
 display_topology(Topology.first())
