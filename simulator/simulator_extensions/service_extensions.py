@@ -2,6 +2,10 @@
 # EdgeSimPy components
 from edge_sim_py.components.container_image import ContainerImage
 from edge_sim_py.components.container_layer import ContainerLayer
+from edge_sim_py.components.network_flow import NetworkFlow
+
+# Python libraries
+import networkx as nx
 
 
 def service_collect(self) -> dict:
@@ -123,3 +127,115 @@ def service_provision(self, target_server: object):
             "sizes_of_uncached_layers": sizes_of_uncached_layers,
         }
     )
+
+
+def service_step(self):
+    """Method that executes the events involving the object at each time step."""
+    if len(self._Service__migrations) > 0 and self._Service__migrations[-1]["end"] == None:
+        migration = self._Service__migrations[-1]
+
+        # Gathering information about the service's image
+        image = ContainerImage.find_by(attribute_name="digest", attribute_value=self.image_digest)
+
+        # Gathering layers present in the target server (layers, download_queue, waiting_queue)
+        layers_downloaded = [l for l in migration["target"].container_layers if l.digest in image.layers_digests]
+        layers_on_download_queue = [
+            flow.metadata["object"] for flow in migration["target"].download_queue if flow.metadata["object"].digest in image.layers_digests
+        ]
+
+        # Setting the migration status to "pulling_layers" once any of the service layers start being downloaded
+        if migration["status"] == "waiting":
+            layers_on_target_server = layers_downloaded + layers_on_download_queue
+
+            if len(layers_on_target_server) > 0:
+                migration["status"] = "pulling_layers"
+
+        if migration["status"] == "pulling_layers" and len(image.layers_digests) == len(layers_downloaded):
+            # Once all the layers that compose the service's image are pulled, the service container is deprovisioned on its
+            # origin host even though it still is in there (that's why it is still on the origin's services list). This action
+            # is only taken in case the current provisioning process regards a migration.
+            if self.server:
+                self.server.cpu_demand -= self.cpu_demand
+                self.server.memory_demand -= self.memory_demand
+
+            # Once all service layers have been pulled, creates a ContainerImage object representing
+            # the service image on the target host if that host didn't already have such image
+            if not any([image.digest == self.image_digest for image in migration["target"].container_images]):
+                # Finding similar image provisioned on the infrastructure to get metadata from it when creating the new image
+                template_image = ContainerImage.find_by(attribute_name="digest", attribute_value=self.image_digest)
+                if template_image is None:
+                    raise Exception(f"Could not find any container image with digest: {self.image_digest}")
+
+                # Creating the new image on the target host
+                image = ContainerImage()
+                image.name = template_image.name
+                image.digest = template_image.digest
+                image.tag = template_image.tag
+                image.architecture = template_image.architecture
+                image.layers_digests = template_image.layers_digests
+
+                # Connecting the new image to the target host
+                image.server = migration["target"]
+                migration["target"].container_images.append(image)
+
+            if self.state == 0 or self.server == None:
+                # Stateless Services: migration is set to finished immediately after layers are pulled
+                migration["status"] = "finished"
+            else:
+                # Stateful Services: state must be migrated to the target host after layers are pulled
+                migration["status"] = "migrating_service_state"
+
+                # Services are unavailable during the period where their states are being migrated
+                self._available = False
+
+                # Selecting the path that will be used to transfer the service state
+                path = nx.shortest_path(
+                    G=self.model.topology,
+                    source=self.server.base_station.network_switch,
+                    target=migration["target"].base_station.network_switch,
+                    weight=lambda u, v, d: len(d["active_flows"]),
+                )
+
+                # Creating network flow representing the service state that will be migrated to its target host
+                flow = NetworkFlow(
+                    topology=self.model.topology,
+                    source=self.server,
+                    target=migration["target"],
+                    start=self.model.schedule.steps + 1,
+                    path=path,
+                    data_to_transfer=self.state,
+                    metadata={"type": "service_state", "object": self},
+                )
+                self.model.initialize_agent(agent=flow)
+
+        # Incrementing the migration time metadata
+        if migration["status"] == "waiting":
+            migration["waiting_time"] += 1
+        elif migration["status"] == "pulling_layers":
+            migration["pulling_layers_time"] += 1
+        elif migration["status"] == "migrating_service_state":
+            migration["migrating_service_state_time"] += 1
+
+        if migration["status"] == "finished":
+            # Storing when the migration has finished
+            migration["end"] = self.model.schedule.steps + 1
+
+            # Updating the service's origin server metadata
+            if self.server:
+                self.server.services.remove(self)
+                self.server.ongoing_migrations -= 1
+
+            # Updating the service's target server metadata
+            self.server = migration["target"]
+            self.server.services.append(self)
+            self.server.ongoing_migrations -= 1
+
+            # Tagging the service as available once their migrations finish
+            self._available = True
+            self.being_provisioned = False
+
+            # Changing the routes used to communicate the application that owns the service to its users
+            app = self.application
+            users = app.users
+            for user in users:
+                user.set_communication_path(app)

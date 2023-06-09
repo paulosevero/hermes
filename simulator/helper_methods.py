@@ -1,7 +1,6 @@
 # EdgeSimPy components
 from edge_sim_py.simulator import Simulator
-from edge_sim_py.components.edge_server import EdgeServer
-from edge_sim_py.components.user import User
+from edge_sim_py.components import *
 
 
 # EdgeSimPy extensions
@@ -22,12 +21,15 @@ def load_edgesimpy_extensions():
     Simulator.run_model = simulator_run_model
     Simulator.monitor = simulator_monitor
     Simulator.dump_data_to_disk = simulator_dump_data_to_disk
+    User.set_communication_path = user_set_communication_path
     EdgeServer._to_dict = edge_server_to_dict
     EdgeServer.collect = edge_server_collect
     EdgeServer.update = edge_server_update
     EdgeServer.step = edge_server_step
+    NetworkFlow.step = network_flow_step
     Service.provision = service_provision
     Service.collect = service_collect
+    Service.step = service_step
 
 
 def maintenance_stopping_criterion(model):
@@ -173,11 +175,12 @@ def get_norm(metadata: dict, attr_name: str, min: dict, max: dict) -> float:
     return normalized_value
 
 
-def find_minimum_and_maximum(metadata: list):
+def find_minimum_and_maximum(metadata: list, nsgaii=False):
     """Finds the minimum and maximum values of a list of dictionaries.
 
     Args:
         metadata (list): List of dictionaries that contains the analyzed metadata.
+        nsgaii (bool): Tells the method what's the format of the analyzed metadata (NSGA-II's metadata has a different structure).
 
     Returns:
         min_and_max (dict): Dictionary that contains the minimum and maximum values of the attributes.
@@ -187,24 +190,44 @@ def find_minimum_and_maximum(metadata: list):
         "maximum": {},
     }
 
-    for metadata_item in metadata:
-        for attr_name, attr_value in metadata_item.items():
-            if attr_name != "object":
-                # Updating the attribute's minimum value
-                if (
-                    attr_name not in min_and_max["minimum"]
-                    or attr_name in min_and_max["minimum"]
-                    and attr_value < min_and_max["minimum"][attr_name]
-                ):
-                    min_and_max["minimum"][attr_name] = attr_value
+    if nsgaii == False:
+        for metadata_item in metadata:
+            for attr_name, attr_value in metadata_item.items():
+                if attr_name != "object":
+                    # Updating the attribute's minimum value
+                    if (
+                        attr_name not in min_and_max["minimum"]
+                        or attr_name in min_and_max["minimum"]
+                        and attr_value < min_and_max["minimum"][attr_name]
+                    ):
+                        min_and_max["minimum"][attr_name] = attr_value
 
-                # Updating the attribute's maximum value
-                if (
-                    attr_name not in min_and_max["maximum"]
-                    or attr_name in min_and_max["maximum"]
-                    and attr_value > min_and_max["maximum"][attr_name]
-                ):
-                    min_and_max["maximum"][attr_name] = attr_value
+                    # Updating the attribute's maximum value
+                    if (
+                        attr_name not in min_and_max["maximum"]
+                        or attr_name in min_and_max["maximum"]
+                        and attr_value > min_and_max["maximum"][attr_name]
+                    ):
+                        min_and_max["maximum"][attr_name] = attr_value
+    else:
+        for metadata_item in metadata:
+            for attr_name, attr_value in metadata_item.items():
+                if attr_name != "Migration Plan":
+                    # Updating the attribute's minimum value
+                    if (
+                        attr_name not in min_and_max["minimum"]
+                        or attr_name in min_and_max["minimum"]
+                        and attr_value < min_and_max["minimum"][attr_name]
+                    ):
+                        min_and_max["minimum"][attr_name] = attr_value
+
+                    # Updating the attribute's maximum value
+                    if (
+                        attr_name not in min_and_max["maximum"]
+                        or attr_name in min_and_max["maximum"]
+                        and attr_value > min_and_max["maximum"][attr_name]
+                    ):
+                        min_and_max["maximum"][attr_name] = attr_value
 
     return min_and_max
 

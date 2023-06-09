@@ -11,7 +11,7 @@ import json
 import msgpack
 
 
-ALGORITHMS_THAT_DISPLAY_METRICS_DURING_SIMULATION = ["hermes", "hermes_v3", "lamp", "salus", "greedy_least_batch"]
+ALGORITHMS_THAT_DISPLAY_METRICS_DURING_SIMULATION = ["hermes", "hermes_v2", "lamp_v2", "lamp", "salus", "greedy_least_batch"]
 VERBOSE_METRICS_TO_HIDE = [
     "wait_times",
     "pulling_times",
@@ -158,14 +158,6 @@ def simulator_run_model(self):
 
         # Calls the methods that collect monitoring data
         self.monitor()
-        if self.executed_resource_management_algorithm:
-            collect_simulation_metrics(simulator=self)
-            if self.resource_management_algorithm.__name__ in ALGORITHMS_THAT_DISPLAY_METRICS_DURING_SIMULATION:
-                print(f"\n=== BATCH {self.maintenance_batches} METRICS ===")
-                per_batch_metrics = self.model_metrics["per_batch"]
-                for key, value in per_batch_metrics.items():
-                    print(f"{key}: {value}")
-                print("=========================================================================")
 
         # Checks if the simulation should end according to the stop condition
         self.running = False if self.stopping_criterion(self) else True
@@ -188,17 +180,23 @@ def simulator_step(self):
     services_being_provisioned = [service for service in Service.all() if service.being_provisioned == True]
 
     if len(servers_being_updated) == 0 and len(services_being_provisioned) == 0:
+        if self.maintenance_batches > 0:
+            # Collecting the simulation metrics of the last maintenance batch
+            collect_simulation_metrics(simulator=self)
+            if self.resource_management_algorithm.__name__ in ALGORITHMS_THAT_DISPLAY_METRICS_DURING_SIMULATION:
+                print(f"\n=== BATCH {self.maintenance_batches} METRICS ===")
+                per_batch_metrics = self.model_metrics["per_batch"]
+                for key, value in per_batch_metrics.items():
+                    print(f"{key}: {value}")
+                print("=========================================================================")
+
         # Updating the maintenance batch count
         self.maintenance_batches += 1
         self.resource_management_algorithm_parameters["current_maintenance_batch"] = self.maintenance_batches
 
-        # Running resource management algorithm if it is not invalid
-        parameters = self.resource_management_algorithm_parameters
-        if self.resource_management_algorithm.__name__ == "nsgaii" and self.maintenance_batches > len(parameters["solution"]):
-            self.invalid_solution = True
-        else:
-            self.executed_resource_management_algorithm = True
-            self.resource_management_algorithm(parameters=self.resource_management_algorithm_parameters)
+        # Running resource management algorithm
+        self.executed_resource_management_algorithm = True
+        self.resource_management_algorithm(parameters=self.resource_management_algorithm_parameters)
 
     # Activating agents
     self.schedule.step()
@@ -209,20 +207,19 @@ def simulator_step(self):
 
 def simulator_monitor(self):
     """Monitors a set of metrics from the model and its agents."""
-    if self.executing_nsgaii_runner == False:
-        # Collecting model-level metrics
-        self.collect()
+    # Collecting model-level metrics
+    self.collect()
 
-        # Collecting agent-level metrics
-        for agent in self.schedule._agents.values():
-            metrics = agent.collect()
+    # Collecting agent-level metrics
+    for agent in self.schedule._agents.values():
+        metrics = agent.collect()
 
-            if metrics != {}:
-                if f"{agent.__class__.__name__}" not in self.agent_metrics:
-                    self.agent_metrics[f"{agent.__class__.__name__}"] = []
+        if metrics != {}:
+            if f"{agent.__class__.__name__}" not in self.agent_metrics:
+                self.agent_metrics[f"{agent.__class__.__name__}"] = []
 
-                metrics = {**{"Object": f"{agent}", "Time Step": self.schedule.steps}, **metrics}
-                self.agent_metrics[f"{agent.__class__.__name__}"].append(metrics)
+            metrics = {**{"Object": f"{agent}", "Time Step": self.schedule.steps}, **metrics}
+            self.agent_metrics[f"{agent.__class__.__name__}"].append(metrics)
 
 
 def simulator_dump_data_to_disk(self, clean_data_in_memory: bool = True) -> None:
@@ -231,252 +228,77 @@ def simulator_dump_data_to_disk(self, clean_data_in_memory: bool = True) -> None
     Args:
         clean_data_in_memory (bool, optional): Purges the list of metrics stored in the memory. Defaults to True.
     """
-    if self.executing_nsgaii_runner == False:
-        if not os.path.exists(f"{self.logs_directory}/"):
-            os.makedirs(f"{self.logs_directory}")
+    if not os.path.exists(f"{self.logs_directory}/"):
+        os.makedirs(f"{self.logs_directory}")
 
-        if self.dump_interval != float("inf"):
-            for key, value in self.agent_metrics.items():
-                with open(f"{self.logs_directory}/{key}.msgpack", "wb") as output_file:
-                    output_file.write(msgpack.packb(value))
+    if self.dump_interval != float("inf"):
+        for key, value in self.agent_metrics.items():
+            with open(f"{self.logs_directory}/{key}.msgpack", "wb") as output_file:
+                output_file.write(msgpack.packb(value))
 
-                if clean_data_in_memory:
-                    value = []
+            if clean_data_in_memory:
+                value = []
 
-        # Saving general simulation metrics in a CSV file
-        with open(f"{self.logs_directory}/general_simulation_metrics.csv", "w") as csvfile:
-            writer = csv.DictWriter(csvfile, fieldnames=self.model_metrics.keys())
-            writer.writeheader()
-            writer.writerows([self.model_metrics])
+    # Saving general simulation metrics in a CSV file
+    with open(f"{self.logs_directory}/general_simulation_metrics.csv", "w") as csvfile:
+        writer = csv.DictWriter(csvfile, fieldnames=self.model_metrics.keys())
+        writer.writeheader()
+        writer.writerows([self.model_metrics])
 
 
 def collect_simulation_metrics(simulator: object):
-    if simulator.executing_nsgaii_runner:
-        delay_sla_violations_per_batch = 0
-        overloaded_edge_servers_per_batch = 0
+    #####################################
+    #### DECLARING PER BATCH METRICS ####
+    #####################################
+    delay_sla_violations_per_batch = 0
+    updated_cpu_capacity_per_batch = 0
+    updated_ram_capacity_per_batch = 0
+    updated_disk_capacity_per_batch = 0
+    updated_cpu_capacity_available_per_batch = 0
+    updated_ram_capacity_available_per_batch = 0
+    updated_disk_capacity_available_per_batch = 0
+    outdated_cpu_capacity_per_batch = 0
+    outdated_ram_capacity_per_batch = 0
+    outdated_disk_capacity_per_batch = 0
+    overloaded_edge_servers_per_batch = 0
+    services_hosted_by_updated_servers_per_batch = 0
+    services_hosted_by_outdated_servers_per_batch = 0
 
-        ######################################
-        #### COLLECTING PER BATCH METRICS ####
-        ######################################
-        # Calculating the number of delay SLA violations per batch
-        for user in User.all():
-            for app in user.applications:
-                user.set_communication_path(app=app)
-                delay_sla = user.delay_slas[str(app.id)]
-                delay = user._compute_delay(app=app, metric="latency")
+    ###################################
+    #### DECLARING OVERALL METRICS ####
+    ###################################
+    wait_times = []
+    pulling_times = []
+    state_migration_times = []
+    cache_hits = 0
+    cache_misses = 0
+    sizes_of_cached_layers = []
+    sizes_of_uncached_layers = []
+    migration_times = []
 
-                if delay > delay_sla:
-                    delay_sla_violations_per_batch += 1
+    ######################################
+    #### COLLECTING PER BATCH METRICS ####
+    ######################################
+    for user in User.all():
+        for app in user.applications:
+            user.set_communication_path(app=app)
+            delay_sla = user.delay_slas[str(app.id)]
+            delay = user._compute_delay(app=app, metric="latency")
 
-        # Calculating the number of overloaded edge servers per batch
-        for edge_server in EdgeServer.all():
-            cpu_is_overloaded = edge_server.cpu_demand > edge_server.cpu
-            memory_is_overloaded = edge_server.memory_demand > edge_server.memory
-            disk_is_overloaded = edge_server.disk_demand > edge_server.disk
+            # Calculating the number of delay SLA violations
+            if delay > delay_sla:
+                delay_sla_violations_per_batch += 1
 
-            if cpu_is_overloaded or memory_is_overloaded or disk_is_overloaded:
-                overloaded_edge_servers_per_batch += 1
+            # Gathering service-related metrics
+            for service in app.services:
+                if service.server.status == "updated":
+                    services_hosted_by_updated_servers_per_batch += 1
+                else:
+                    services_hosted_by_outdated_servers_per_batch += 1
 
-        #############################
-        #### AGGREGATING METRICS ####
-        #############################
-        if "per_batch" not in simulator.model_metrics:
-            simulator.model_metrics = {
-                "per_batch": {
-                    "delay_sla_violations_per_batch": [],
-                    "overloaded_edge_servers_per_batch": [],
-                }
-            }
-
-        if simulator.running == True:
-            simulator.model_metrics["per_batch"]["delay_sla_violations_per_batch"].append(delay_sla_violations_per_batch)
-            simulator.model_metrics["per_batch"]["overloaded_edge_servers_per_batch"].append(overloaded_edge_servers_per_batch)
-        else:
-            simulator.model_metrics["per_batch"]["delay_sla_violations_per_batch"][-1] = delay_sla_violations_per_batch
-            simulator.model_metrics["per_batch"]["overloaded_edge_servers_per_batch"][-1] = overloaded_edge_servers_per_batch
-
-        algorithm = str(simulator.resource_management_algorithm.__name__)
-        execution_time = simulator.execution_time if hasattr(simulator, "execution_time") else None
-        invalid_solution = int(simulator.invalid_solution)
-        overall_overloaded_edge_servers = sum(simulator.model_metrics["per_batch"]["overloaded_edge_servers_per_batch"])
-        penalty = invalid_solution * EdgeServer.count() + overall_overloaded_edge_servers
-        maintenance_batches = simulator.maintenance_batches
-        maintenance_time = simulator.schedule.steps
-        overall_delay_sla_violations = sum(simulator.model_metrics["per_batch"]["delay_sla_violations_per_batch"])
-
-        if "overall" not in simulator.model_metrics:
-            simulator.model_metrics["overall"] = {}
-
-        simulator.model_metrics["overall"]["algorithm"] = algorithm
-        simulator.model_metrics["overall"]["invalid_solution"] = invalid_solution
-        simulator.model_metrics["overall"]["penalty"] = penalty
-        simulator.model_metrics["overall"]["overall_overloaded_edge_servers"] = overall_overloaded_edge_servers
-        simulator.model_metrics["overall"]["execution_time"] = execution_time
-        simulator.model_metrics["overall"]["maintenance_batches"] = maintenance_batches
-        simulator.model_metrics["overall"]["maintenance_time"] = maintenance_time
-        simulator.model_metrics["overall"]["overall_delay_sla_violations"] = overall_delay_sla_violations
-
-    else:
-        #####################################
-        #### DECLARING PER BATCH METRICS ####
-        #####################################
-        delay_sla_violations_per_batch = 0
-        updated_cpu_capacity_per_batch = 0
-        updated_ram_capacity_per_batch = 0
-        updated_disk_capacity_per_batch = 0
-        updated_cpu_capacity_available_per_batch = 0
-        updated_ram_capacity_available_per_batch = 0
-        updated_disk_capacity_available_per_batch = 0
-        outdated_cpu_capacity_per_batch = 0
-        outdated_ram_capacity_per_batch = 0
-        outdated_disk_capacity_per_batch = 0
-        overloaded_edge_servers_per_batch = 0
-        services_hosted_by_updated_servers_per_batch = 0
-        services_hosted_by_outdated_servers_per_batch = 0
-
-        ###################################
-        #### DECLARING OVERALL METRICS ####
-        ###################################
-        wait_times = []
-        pulling_times = []
-        state_migration_times = []
-        cache_hits = 0
-        cache_misses = 0
-        sizes_of_cached_layers = []
-        sizes_of_uncached_layers = []
-        migration_times = []
-
-        ######################################
-        #### COLLECTING PER BATCH METRICS ####
-        ######################################
-        for user in User.all():
-            for app in user.applications:
-                user.set_communication_path(app=app)
-                delay_sla = user.delay_slas[str(app.id)]
-                delay = user._compute_delay(app=app, metric="latency")
-
-                # Calculating the number of delay SLA violations
-                if delay > delay_sla:
-                    delay_sla_violations_per_batch += 1
-
-                # Gathering service-related metrics
-                for service in app.services:
-                    if service.server.status == "updated":
-                        services_hosted_by_updated_servers_per_batch += 1
-                    else:
-                        services_hosted_by_outdated_servers_per_batch += 1
-
-        for edge_server in EdgeServer.all():
-            cpu_is_overloaded = edge_server.cpu_demand > edge_server.cpu
-            memory_is_overloaded = edge_server.memory_demand > edge_server.memory
-            disk_is_overloaded = edge_server.disk_demand > edge_server.disk
-
-            if cpu_is_overloaded or memory_is_overloaded or disk_is_overloaded:
-                overloaded_edge_servers_per_batch += 1
-
-            if edge_server.status == "updated":
-                updated_cpu_capacity_per_batch += edge_server.cpu
-                updated_ram_capacity_per_batch += edge_server.memory
-                updated_disk_capacity_per_batch += edge_server.disk
-                updated_cpu_capacity_available_per_batch += edge_server.cpu - edge_server.cpu_demand
-                updated_ram_capacity_available_per_batch += edge_server.memory - edge_server.memory_demand
-                updated_disk_capacity_available_per_batch += edge_server.disk - edge_server.disk_demand
-
-            else:
-                outdated_cpu_capacity_per_batch += edge_server.cpu
-                outdated_ram_capacity_per_batch += edge_server.memory
-                outdated_disk_capacity_per_batch += edge_server.disk
-
-        # Consolidating per batch metrics
-        if "per_batch" not in simulator.model_metrics:
-            simulator.model_metrics = {
-                "per_batch": {
-                    "delay_sla_violations_per_batch": [],
-                    "services_hosted_by_updated_servers_per_batch": [],
-                    "services_hosted_by_outdated_servers_per_batch": [],
-                    "overloaded_edge_servers_per_batch": [],
-                    "updated_cpu_capacity_per_batch": [],
-                    "updated_ram_capacity_per_batch": [],
-                    "updated_disk_capacity_per_batch": [],
-                    "updated_cpu_capacity_available_per_batch": [],
-                    "updated_ram_capacity_available_per_batch": [],
-                    "updated_disk_capacity_available_per_batch": [],
-                    "outdated_cpu_capacity_per_batch": [],
-                    "outdated_ram_capacity_per_batch": [],
-                    "outdated_disk_capacity_per_batch": [],
-                }
-            }
-
-        if simulator.running == True:
-            simulator.model_metrics["per_batch"]["delay_sla_violations_per_batch"].append(delay_sla_violations_per_batch)
-            simulator.model_metrics["per_batch"]["updated_cpu_capacity_per_batch"].append(updated_cpu_capacity_per_batch)
-            simulator.model_metrics["per_batch"]["updated_ram_capacity_per_batch"].append(updated_ram_capacity_per_batch)
-            simulator.model_metrics["per_batch"]["updated_disk_capacity_per_batch"].append(updated_disk_capacity_per_batch)
-
-            simulator.model_metrics["per_batch"]["updated_cpu_capacity_available_per_batch"].append(
-                updated_cpu_capacity_available_per_batch
-            )
-            simulator.model_metrics["per_batch"]["updated_ram_capacity_available_per_batch"].append(
-                updated_ram_capacity_available_per_batch
-            )
-            simulator.model_metrics["per_batch"]["updated_disk_capacity_available_per_batch"].append(
-                updated_disk_capacity_available_per_batch
-            )
-
-            simulator.model_metrics["per_batch"]["outdated_cpu_capacity_per_batch"].append(outdated_cpu_capacity_per_batch)
-            simulator.model_metrics["per_batch"]["outdated_ram_capacity_per_batch"].append(outdated_ram_capacity_per_batch)
-            simulator.model_metrics["per_batch"]["outdated_disk_capacity_per_batch"].append(outdated_disk_capacity_per_batch)
-            simulator.model_metrics["per_batch"]["services_hosted_by_updated_servers_per_batch"].append(
-                services_hosted_by_updated_servers_per_batch
-            )
-            simulator.model_metrics["per_batch"]["services_hosted_by_outdated_servers_per_batch"].append(
-                services_hosted_by_outdated_servers_per_batch
-            )
-            simulator.model_metrics["per_batch"]["overloaded_edge_servers_per_batch"].append(overloaded_edge_servers_per_batch)
-        else:
-            simulator.model_metrics["per_batch"]["delay_sla_violations_per_batch"][-1] = delay_sla_violations_per_batch
-            simulator.model_metrics["per_batch"]["updated_cpu_capacity_per_batch"][-1] = updated_cpu_capacity_per_batch
-            simulator.model_metrics["per_batch"]["updated_ram_capacity_per_batch"][-1] = updated_ram_capacity_per_batch
-            simulator.model_metrics["per_batch"]["updated_disk_capacity_per_batch"][-1] = updated_disk_capacity_per_batch
-
-            simulator.model_metrics["per_batch"]["updated_cpu_capacity_available_per_batch"][
-                -1
-            ] = updated_cpu_capacity_available_per_batch
-            simulator.model_metrics["per_batch"]["updated_ram_capacity_available_per_batch"][
-                -1
-            ] = updated_ram_capacity_available_per_batch
-            simulator.model_metrics["per_batch"]["updated_disk_capacity_available_per_batch"][
-                -1
-            ] = updated_disk_capacity_available_per_batch
-
-            simulator.model_metrics["per_batch"]["outdated_cpu_capacity_per_batch"][-1] = outdated_cpu_capacity_per_batch
-            simulator.model_metrics["per_batch"]["outdated_ram_capacity_per_batch"][-1] = outdated_ram_capacity_per_batch
-            simulator.model_metrics["per_batch"]["outdated_disk_capacity_per_batch"][-1] = outdated_disk_capacity_per_batch
-            simulator.model_metrics["per_batch"]["services_hosted_by_updated_servers_per_batch"][
-                -1
-            ] = services_hosted_by_updated_servers_per_batch
-            simulator.model_metrics["per_batch"]["services_hosted_by_outdated_servers_per_batch"][
-                -1
-            ] = services_hosted_by_outdated_servers_per_batch
-            simulator.model_metrics["per_batch"]["overloaded_edge_servers_per_batch"][-1] = overloaded_edge_servers_per_batch
-
-        ####################################
-        #### COLLECTING OVERALL METRICS ####
-        ####################################
-        if simulator.running == False:
-            algorithm = str(simulator.resource_management_algorithm.__name__)
-            execution_time = simulator.execution_time if hasattr(simulator, "execution_time") else None
-            invalid_solution = int(simulator.invalid_solution)
-            overall_overloaded_edge_servers = sum(simulator.model_metrics["per_batch"]["overloaded_edge_servers_per_batch"])
-            penalty = invalid_solution * EdgeServer.count() + overall_overloaded_edge_servers
-            maintenance_batches = simulator.maintenance_batches
-            maintenance_time = simulator.schedule.steps
-
-            overall_delay_sla_violations = sum(simulator.model_metrics["per_batch"]["delay_sla_violations_per_batch"])
-            number_of_migrations = sum([len(s._Service__migrations) for s in Service.all()])
-
-            for service in Service.all():
-                for migration in service._Service__migrations:
+                current_batch = simulator.maintenance_batches
+                if len(service._Service__migrations) > 0 and service._Service__migrations[-1]["maintenance_batch"] == current_batch:
+                    migration = service._Service__migrations[-1]
                     cache_hits += migration["cache_hits"]
                     cache_misses += migration["cache_misses"]
 
@@ -489,58 +311,188 @@ def collect_simulation_metrics(simulator: object):
                     if migration["end"] != None:
                         migration_times.append(migration["end"] - migration["start"])
 
-            # Aggregating provisioning time metrics
-            if len(wait_times) > 0:
-                overall_wait_times = sum(wait_times) if len(wait_times) > 0 else 0
-                min_wait_times = min(wait_times) if len(wait_times) > 0 else 0
-                max_wait_times = max(wait_times) if len(wait_times) > 0 else 0
-                avg_wait_times = sum(wait_times) / len(wait_times) if len(wait_times) > 0 else 0
-            if len(pulling_times) > 0:
-                overall_pulling_times = sum(pulling_times) if len(pulling_times) > 0 else 0
-                min_pulling_times = min(pulling_times) if len(pulling_times) > 0 else 0
-                max_pulling_times = max(pulling_times) if len(pulling_times) > 0 else 0
-                avg_pulling_times = sum(pulling_times) / len(pulling_times) if len(pulling_times) > 0 else 0
-            if len(state_migration_times) > 0:
-                overall_state_migration_times = sum(state_migration_times) if len(state_migration_times) > 0 else 0
-                min_state_migration_times = min(state_migration_times) if len(state_migration_times) > 0 else 0
-                max_state_migration_times = max(state_migration_times) if len(state_migration_times) > 0 else 0
-                avg_state_migration_times = (
-                    sum(state_migration_times) / len(state_migration_times) if len(state_migration_times) > 0 else 0
-                )
+    # Aggregating provisioning time metrics
+    min_wait_times_per_batch = min(wait_times) if len(wait_times) > 0 else 0
+    max_wait_times_per_batch = max(wait_times) if len(wait_times) > 0 else 0
+    avg_wait_times_per_batch = sum(wait_times) / len(wait_times) if len(wait_times) > 0 else 0
 
-            overall_provisioning_time = overall_wait_times + overall_pulling_times + overall_state_migration_times
+    min_pulling_times_per_batch = min(pulling_times) if len(pulling_times) > 0 else 0
+    max_pulling_times_per_batch = max(pulling_times) if len(pulling_times) > 0 else 0
+    avg_pulling_times_per_batch = sum(pulling_times) / len(pulling_times) if len(pulling_times) > 0 else 0
 
-            # Consolidating overall metrics
-            if "overall" not in simulator.model_metrics:
-                simulator.model_metrics["overall"] = {}
+    min_state_migration_times_per_batch = min(state_migration_times) if len(state_migration_times) > 0 else 0
+    max_state_migration_times_per_batch = max(state_migration_times) if len(state_migration_times) > 0 else 0
+    avg_state_migration_times_per_batch = sum(state_migration_times) / len(state_migration_times) if len(state_migration_times) > 0 else 0
 
-            simulator.model_metrics["overall"]["algorithm"] = algorithm
-            simulator.model_metrics["overall"]["invalid_solution"] = invalid_solution
-            simulator.model_metrics["overall"]["penalty"] = penalty
-            simulator.model_metrics["overall"]["overall_overloaded_edge_servers"] = overall_overloaded_edge_servers
-            simulator.model_metrics["overall"]["execution_time"] = execution_time
-            simulator.model_metrics["overall"]["maintenance_batches"] = maintenance_batches
-            simulator.model_metrics["overall"]["maintenance_time"] = maintenance_time
-            simulator.model_metrics["overall"]["cache_hits"] = cache_hits
-            simulator.model_metrics["overall"]["cache_misses"] = cache_misses
-            simulator.model_metrics["overall"]["wait_times"] = wait_times
-            simulator.model_metrics["overall"]["pulling_times"] = pulling_times
-            simulator.model_metrics["overall"]["state_migration_times"] = state_migration_times
-            simulator.model_metrics["overall"]["sizes_of_cached_layers"] = sizes_of_cached_layers
-            simulator.model_metrics["overall"]["sizes_of_uncached_layers"] = sizes_of_uncached_layers
-            simulator.model_metrics["overall"]["migration_times"] = migration_times
-            simulator.model_metrics["overall"]["overall_delay_sla_violations"] = overall_delay_sla_violations
-            simulator.model_metrics["overall"]["number_of_migrations"] = number_of_migrations
-            simulator.model_metrics["overall"]["overall_wait_times"] = overall_wait_times
-            simulator.model_metrics["overall"]["min_wait_times"] = min_wait_times
-            simulator.model_metrics["overall"]["max_wait_times"] = max_wait_times
-            simulator.model_metrics["overall"]["avg_wait_times"] = avg_wait_times
-            simulator.model_metrics["overall"]["overall_pulling_times"] = overall_pulling_times
-            simulator.model_metrics["overall"]["min_pulling_times"] = min_pulling_times
-            simulator.model_metrics["overall"]["max_pulling_times"] = max_pulling_times
-            simulator.model_metrics["overall"]["avg_pulling_times"] = avg_pulling_times
-            simulator.model_metrics["overall"]["overall_state_migration_times"] = overall_state_migration_times
-            simulator.model_metrics["overall"]["min_state_migration_times"] = min_state_migration_times
-            simulator.model_metrics["overall"]["max_state_migration_times"] = max_state_migration_times
-            simulator.model_metrics["overall"]["avg_state_migration_times"] = avg_state_migration_times
-            simulator.model_metrics["overall"]["overall_provisioning_time"] = overall_provisioning_time
+    min_migration_times_per_batch = min(migration_times) if len(migration_times) > 0 else 0
+    max_migration_times_per_batch = max(migration_times) if len(migration_times) > 0 else 0
+    avg_migration_times_per_batch = sum(migration_times) / len(migration_times) if len(migration_times) > 0 else 0
+
+    for edge_server in EdgeServer.all():
+        cpu_is_overloaded = edge_server.cpu_demand > edge_server.cpu
+        memory_is_overloaded = edge_server.memory_demand > edge_server.memory
+        disk_is_overloaded = edge_server.disk_demand > edge_server.disk
+
+        if cpu_is_overloaded or memory_is_overloaded or disk_is_overloaded:
+            overloaded_edge_servers_per_batch += 1
+
+        if edge_server.status == "updated":
+            updated_cpu_capacity_per_batch += edge_server.cpu
+            updated_ram_capacity_per_batch += edge_server.memory
+            updated_disk_capacity_per_batch += edge_server.disk
+            updated_cpu_capacity_available_per_batch += edge_server.cpu - edge_server.cpu_demand
+            updated_ram_capacity_available_per_batch += edge_server.memory - edge_server.memory_demand
+            updated_disk_capacity_available_per_batch += edge_server.disk - edge_server.disk_demand
+
+        else:
+            outdated_cpu_capacity_per_batch += edge_server.cpu
+            outdated_ram_capacity_per_batch += edge_server.memory
+            outdated_disk_capacity_per_batch += edge_server.disk
+
+    # Consolidating per batch metrics
+    if "per_batch" not in simulator.model_metrics:
+        simulator.model_metrics = {
+            "per_batch": {
+                "maintenance_times": [],
+                "delay_sla_violations": [],
+                "services_hosted_by_updated_servers": [],
+                "services_hosted_by_outdated_servers": [],
+                "min_wait_times": [],
+                "min_pulling_times": [],
+                "min_state_migration_times": [],
+                "min_migration_times": [],
+                "avg_wait_times": [],
+                "avg_pulling_times": [],
+                "avg_state_migration_times": [],
+                "avg_migration_times": [],
+                "max_wait_times": [],
+                "max_pulling_times": [],
+                "max_state_migration_times": [],
+                "max_migration_times": [],
+                "overloaded_edge_servers": [],
+                "updated_cpu_capacity": [],
+                "updated_ram_capacity": [],
+                "updated_disk_capacity": [],
+                "updated_cpu_capacity_available": [],
+                "updated_ram_capacity_available": [],
+                "updated_disk_capacity_available": [],
+                "outdated_cpu_capacity": [],
+                "outdated_ram_capacity": [],
+                "outdated_disk_capacity": [],
+            }
+        }
+
+    simulator.model_metrics["per_batch"]["maintenance_times"].append(simulator.schedule.steps)
+
+    simulator.model_metrics["per_batch"]["delay_sla_violations"].append(delay_sla_violations_per_batch)
+    simulator.model_metrics["per_batch"]["updated_cpu_capacity"].append(updated_cpu_capacity_per_batch)
+    simulator.model_metrics["per_batch"]["updated_ram_capacity"].append(updated_ram_capacity_per_batch)
+    simulator.model_metrics["per_batch"]["updated_disk_capacity"].append(updated_disk_capacity_per_batch)
+
+    simulator.model_metrics["per_batch"]["updated_cpu_capacity_available"].append(updated_cpu_capacity_available_per_batch)
+    simulator.model_metrics["per_batch"]["updated_ram_capacity_available"].append(updated_ram_capacity_available_per_batch)
+    simulator.model_metrics["per_batch"]["updated_disk_capacity_available"].append(updated_disk_capacity_available_per_batch)
+
+    simulator.model_metrics["per_batch"]["outdated_cpu_capacity"].append(outdated_cpu_capacity_per_batch)
+    simulator.model_metrics["per_batch"]["outdated_ram_capacity"].append(outdated_ram_capacity_per_batch)
+    simulator.model_metrics["per_batch"]["outdated_disk_capacity"].append(outdated_disk_capacity_per_batch)
+    simulator.model_metrics["per_batch"]["services_hosted_by_updated_servers"].append(services_hosted_by_updated_servers_per_batch)
+    simulator.model_metrics["per_batch"]["services_hosted_by_outdated_servers"].append(services_hosted_by_outdated_servers_per_batch)
+
+    simulator.model_metrics["per_batch"]["min_wait_times"].append(min_wait_times_per_batch)
+    simulator.model_metrics["per_batch"]["max_wait_times"].append(max_wait_times_per_batch)
+    simulator.model_metrics["per_batch"]["avg_wait_times"].append(avg_wait_times_per_batch)
+    simulator.model_metrics["per_batch"]["min_pulling_times"].append(min_pulling_times_per_batch)
+    simulator.model_metrics["per_batch"]["max_pulling_times"].append(max_pulling_times_per_batch)
+    simulator.model_metrics["per_batch"]["avg_pulling_times"].append(avg_pulling_times_per_batch)
+    simulator.model_metrics["per_batch"]["min_state_migration_times"].append(min_state_migration_times_per_batch)
+    simulator.model_metrics["per_batch"]["max_state_migration_times"].append(max_state_migration_times_per_batch)
+    simulator.model_metrics["per_batch"]["avg_state_migration_times"].append(avg_state_migration_times_per_batch)
+    simulator.model_metrics["per_batch"]["min_migration_times"].append(min_migration_times_per_batch)
+    simulator.model_metrics["per_batch"]["max_migration_times"].append(max_migration_times_per_batch)
+    simulator.model_metrics["per_batch"]["avg_migration_times"].append(avg_migration_times_per_batch)
+
+    simulator.model_metrics["per_batch"]["overloaded_edge_servers"].append(overloaded_edge_servers_per_batch)
+
+    ####################################
+    #### COLLECTING OVERALL METRICS ####
+    ####################################
+    if simulator.running == False:
+        algorithm = str(simulator.resource_management_algorithm.__name__)
+        execution_time = simulator.execution_time if hasattr(simulator, "execution_time") else None
+        invalid_solution = int(simulator.invalid_solution)
+        overall_overloaded_edge_servers = sum(simulator.model_metrics["per_batch"]["overloaded_edge_servers"])
+        penalty = invalid_solution * EdgeServer.count() + overall_overloaded_edge_servers
+        maintenance_batches = simulator.maintenance_batches
+        maintenance_time = simulator.schedule.steps
+
+        overall_delay_sla_violations = sum(simulator.model_metrics["per_batch"]["delay_sla_violations"])
+        number_of_migrations = sum([len(s._Service__migrations) for s in Service.all()])
+
+        for service in Service.all():
+            for migration in service._Service__migrations:
+                cache_hits += migration["cache_hits"]
+                cache_misses += migration["cache_misses"]
+
+                wait_times.append(migration["waiting_time"])
+                pulling_times.append(migration["pulling_layers_time"])
+                state_migration_times.append(migration["migrating_service_state_time"])
+                sizes_of_cached_layers.extend(migration["sizes_of_cached_layers"])
+                sizes_of_uncached_layers.extend(migration["sizes_of_uncached_layers"])
+
+                if migration["end"] != None:
+                    migration_times.append(migration["end"] - migration["start"])
+
+        # Aggregating provisioning time metrics
+        if len(wait_times) > 0:
+            overall_wait_times = sum(wait_times) if len(wait_times) > 0 else 0
+            min_wait_times = min(wait_times) if len(wait_times) > 0 else 0
+            max_wait_times = max(wait_times) if len(wait_times) > 0 else 0
+            avg_wait_times = sum(wait_times) / len(wait_times) if len(wait_times) > 0 else 0
+        if len(pulling_times) > 0:
+            overall_pulling_times = sum(pulling_times) if len(pulling_times) > 0 else 0
+            min_pulling_times = min(pulling_times) if len(pulling_times) > 0 else 0
+            max_pulling_times = max(pulling_times) if len(pulling_times) > 0 else 0
+            avg_pulling_times = sum(pulling_times) / len(pulling_times) if len(pulling_times) > 0 else 0
+        if len(state_migration_times) > 0:
+            overall_state_migration_times = sum(state_migration_times) if len(state_migration_times) > 0 else 0
+            min_state_migration_times = min(state_migration_times) if len(state_migration_times) > 0 else 0
+            max_state_migration_times = max(state_migration_times) if len(state_migration_times) > 0 else 0
+            avg_state_migration_times = sum(state_migration_times) / len(state_migration_times) if len(state_migration_times) > 0 else 0
+
+        overall_provisioning_time = overall_wait_times + overall_pulling_times + overall_state_migration_times
+
+        # Consolidating overall metrics
+        if "overall" not in simulator.model_metrics:
+            simulator.model_metrics["overall"] = {}
+
+        simulator.model_metrics["overall"]["algorithm"] = algorithm
+        simulator.model_metrics["overall"]["invalid_solution"] = invalid_solution
+        simulator.model_metrics["overall"]["penalty"] = penalty
+        simulator.model_metrics["overall"]["overall_overloaded_edge_servers"] = overall_overloaded_edge_servers
+        simulator.model_metrics["overall"]["execution_time"] = execution_time
+        simulator.model_metrics["overall"]["maintenance_batches"] = maintenance_batches
+        simulator.model_metrics["overall"]["maintenance_time"] = maintenance_time
+        simulator.model_metrics["overall"]["cache_hits"] = cache_hits
+        simulator.model_metrics["overall"]["cache_misses"] = cache_misses
+        simulator.model_metrics["overall"]["wait_times"] = wait_times
+        simulator.model_metrics["overall"]["pulling_times"] = pulling_times
+        simulator.model_metrics["overall"]["state_migration_times"] = state_migration_times
+        simulator.model_metrics["overall"]["sizes_of_cached_layers"] = sizes_of_cached_layers
+        simulator.model_metrics["overall"]["sizes_of_uncached_layers"] = sizes_of_uncached_layers
+        simulator.model_metrics["overall"]["migration_times"] = migration_times
+        simulator.model_metrics["overall"]["overall_delay_sla_violations"] = overall_delay_sla_violations
+        simulator.model_metrics["overall"]["number_of_migrations"] = number_of_migrations
+        simulator.model_metrics["overall"]["overall_wait_times"] = overall_wait_times
+        simulator.model_metrics["overall"]["min_wait_times"] = min_wait_times
+        simulator.model_metrics["overall"]["max_wait_times"] = max_wait_times
+        simulator.model_metrics["overall"]["avg_wait_times"] = avg_wait_times
+        simulator.model_metrics["overall"]["overall_pulling_times"] = overall_pulling_times
+        simulator.model_metrics["overall"]["min_pulling_times"] = min_pulling_times
+        simulator.model_metrics["overall"]["max_pulling_times"] = max_pulling_times
+        simulator.model_metrics["overall"]["avg_pulling_times"] = avg_pulling_times
+        simulator.model_metrics["overall"]["overall_state_migration_times"] = overall_state_migration_times
+        simulator.model_metrics["overall"]["min_state_migration_times"] = min_state_migration_times
+        simulator.model_metrics["overall"]["max_state_migration_times"] = max_state_migration_times
+        simulator.model_metrics["overall"]["avg_state_migration_times"] = avg_state_migration_times
+        simulator.model_metrics["overall"]["overall_provisioning_time"] = overall_provisioning_time

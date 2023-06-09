@@ -3,10 +3,64 @@ import json
 import tabulate
 
 # Defining specifications for container images and container registries
-# with open("top150_images_dockerhub.json", "r", encoding="UTF-8") as read_file:
-with open("container_images_raw.json", "r", encoding="UTF-8") as read_file:
+ONLY_IMAGES_OF_INTEREST = True
+IMAGES_OF_INTEREST = [
+    ###########################
+    #### Operating Systems ####
+    ###########################
+    "debian",
+    "centos",
+    "ubuntu",
+    "clearlinux",
+    "fedora",
+    ###########################
+    #### Language Runtimes ####
+    ###########################
+    "python",
+    "erlang",
+    "groovy",
+    "perl",
+    "elixir",
+    ##############################
+    #### Generic Applications ####
+    ##############################
+    "teamspeak",
+    "flink",
+    "memcached",
+    "telegraf",
+    "mongo",
+]
+
+with open("top150_images_dockerhub.json", "r", encoding="UTF-8") as read_file:
     data = json.load(read_file)
-container_images = [item for item in data if "layers" in item]
+
+container_images = []
+for image_metadata in data:
+    if "layers" in image_metadata:
+        if ONLY_IMAGES_OF_INTEREST and image_metadata["name"] not in IMAGES_OF_INTEREST:
+            continue
+
+        image = {
+            "name": image_metadata["name"],
+            "digest": image_metadata["digest"],
+            "description": image_metadata["description"],
+            "architecture": image_metadata["architecture"],
+            "star_count": image_metadata["star_count"],
+            "pull_count": image_metadata["pull_count"],
+            "size": image_metadata["size"],
+            "layers": [],
+        }
+        for layer in image_metadata["layers"]:
+            if layer["size"] >= 1:
+                image["layers"].append(layer)
+
+        if len(image["layers"]) > 0:
+            container_images.append(image)
+
+
+for image in container_images:
+    print(f"{image['name']}. Size: {image['size']}. Layers: {len(image['layers'])}")
+
 
 # Collecting layer information
 container_layers = {}
@@ -76,6 +130,7 @@ for index, container_image in enumerate(container_images, 1):
         "name": container_image["name"],
         "number_of_layers": len(container_image["layers"]),
         "total_size": container_image["size"],
+        "avg_layer_size": container_image["size"] / len(container_image["layers"]),
         "size_unique": container_image["size_unique_layers"],
         "size_shared": container_image["size_shared_layers"],
     }

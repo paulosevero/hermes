@@ -33,7 +33,7 @@ def randomized_closest_fit():
                 }
             )
 
-        edge_servers = sorted(edge_servers, key=lambda s: (s["violates_sla"], s["free_capacity"]))
+        edge_servers = sorted(edge_servers, key=lambda s: (s["violates_sla"]))
 
         for edge_server_metadata in edge_servers:
             edge_server = edge_server_metadata["object"]
@@ -84,10 +84,10 @@ def randomized_closest_fit():
 seed(0)
 
 # Creating list of map coordinates
-map_coordinates = hexagonal_grid(x_size=8, y_size=8)
+map_coordinates = hexagonal_grid(x_size=13, y_size=13)
 
-SERVERS_PER_SPEC = 6
-SERVER_PATCH_TIME = 180
+SERVERS_PER_SPEC = 15
+SERVER_PATCH_TIME = 120
 edge_server_specifications = [
     {
         "number_of_objects": SERVERS_PER_SPEC,
@@ -109,6 +109,16 @@ edge_server_specifications = [
         "static_power_percentage": 265 / 1387,
         "max_power_consumption": 1387,
     },
+    # {
+    #     "number_of_objects": SERVERS_PER_SPEC,
+    #     "model_name": "Server 2 - HPE ProLiant DL360 Gen9",
+    #     "patch_time": SERVER_PATCH_TIME,
+    #     "cpu": 36,
+    #     "memory": 64,
+    #     "disk": 131072,  # 128 GB
+    #     "static_power_percentage": 45 / 276,
+    #     "max_power_consumption": 276,
+    # },
 ]
 
 # Creating base stations for providing wireless connectivity to users and network switches for wired connectivity
@@ -126,7 +136,7 @@ for coordinates_id, coordinates in enumerate(map_coordinates):
 partially_connected_hexagonal_mesh(
     network_nodes=NetworkSwitch.all(),
     link_specifications=[
-        {"number_of_objects": 161, "delay": 5, "bandwidth": 12.5},
+        {"number_of_objects": 456, "delay": 5, "bandwidth": 12.5},
     ],
 )
 
@@ -161,28 +171,6 @@ for spec in edge_server_specifications:
         base_station._connect_to_edge_server(edge_server=edge_server)
 
 
-# Manually creating an edge server that will be fully occupied by the container registry
-CONTAINER_REGISTRY_BASE_STATION = 36
-registry_host_spec = edge_server_specifications[0]
-edge_server = EdgeServer()
-edge_server.model_name = registry_host_spec["model_name"]
-
-# Computational capacity (CPU in cores, RAM memory in megabytes, disk in megabytes, and millions of instructions per second)
-edge_server.cpu = registry_host_spec["cpu"]
-edge_server.memory = registry_host_spec["memory"]
-edge_server.disk = registry_host_spec["disk"]
-edge_server.patch_time = registry_host_spec["patch_time"]
-edge_server.status = "updated"
-edge_server.patching_log = {
-    "started_at": 0,
-    "finished_at": 0,
-}
-
-# Connecting the edge server to a random base station that has no edge server connected to it yet
-base_station = BaseStation.find_by_id(CONTAINER_REGISTRY_BASE_STATION)
-base_station._connect_to_edge_server(edge_server=edge_server)
-
-
 # Reading specifications for container images and container registries
 with open("container_images.json", "r", encoding="UTF-8") as read_file:
     container_image_specifications = json.load(read_file)
@@ -204,6 +192,34 @@ container_registry_image = {
 }
 container_image_specifications.append(container_registry_image)
 
+# Defining service image specifications
+service_image_specifications = [
+    ###########################
+    #### Operating Systems ####
+    ###########################
+    {"state": 0, "image_name": "debian"},
+    {"state": 0, "image_name": "centos"},
+    {"state": 0, "image_name": "ubuntu"},
+    {"state": 0, "image_name": "clearlinux"},
+    {"state": 0, "image_name": "fedora"},
+    ###########################
+    #### Language Runtimes ####
+    ###########################
+    {"state": 0, "image_name": "python"},
+    {"state": 0, "image_name": "erlang"},
+    {"state": 0, "image_name": "groovy"},
+    {"state": 0, "image_name": "perl"},
+    {"state": 0, "image_name": "elixir"},
+    ##############################
+    #### Generic Applications ####
+    ##############################
+    {"state": 50, "image_name": "teamspeak"},  # VoIP communication system for online gaming
+    {"state": 100, "image_name": "flink"},  # Stream and batch processing
+    {"state": 100, "image_name": "memcached"},  # Caching
+    {"state": 100, "image_name": "telegraf"},  # Monitoring
+    {"state": 200, "image_name": "mongo"},  # Database
+]
+
 # Adding a "latest" tag to all container images
 condensed_images_metadata = []
 for container_image in container_image_specifications:
@@ -216,56 +232,80 @@ for container_image in container_image_specifications:
         }
     )
 
+
 container_registry_specifications = [
+    # {
+    #     "number_of_objects": 1,
+    #     "base_station_id": 82,
+    #     "edge_server_specification": next((spec for spec in edge_server_specifications if "Server 1" in spec["model_name"]), None),
+    #     "images": condensed_images_metadata,
+    # },
+    # {
+    #     "number_of_objects": 1,
+    #     "base_station_id": 88,
+    #     "edge_server_specification": next((spec for spec in edge_server_specifications if "Server 1" in spec["model_name"]), None),
+    #     "images": condensed_images_metadata,
+    # },
     {
         "number_of_objects": 1,
-        "cpu_demand": registry_host_spec["cpu"],
-        "memory_demand": registry_host_spec["memory"],
+        "base_station_id": 85,
+        "edge_server_specification": next((spec for spec in edge_server_specifications if "Server 1" in spec["model_name"]), None),
         "images": condensed_images_metadata,
-    }
+    },
 ]
 
 # Parsing the specifications for container images and container registries
-container_registries = create_container_registries(
+registries = create_container_registries(
     container_registry_specifications=container_registry_specifications,
     container_image_specifications=container_image_specifications,
 )
 
-# Defining the initial placement for container images and container registries
-container_registry_host = [
-    edge_server for edge_server in EdgeServer.all() if edge_server.base_station.id == CONTAINER_REGISTRY_BASE_STATION
-][0]
-provision_container_registry(container_registry_specification=container_registries[0], server=container_registry_host)
+# Creating container registries and accommodating them within the infrastructure
+for index, registry_spec in enumerate(container_registry_specifications):
+    # Creating an edge server to host the registry
+    registry_host_spec = registry_spec["edge_server_specification"]
+    registry_host = EdgeServer()
+    registry_host.model_name = registry_host_spec["model_name"]
+
+    # Computational capacity (CPU in cores, RAM memory in megabytes, disk in megabytes, and millions of instructions per second)
+    registry_host.cpu = registry_host_spec["cpu"]
+    registry_host.memory = registry_host_spec["memory"]
+    registry_host.disk = registry_host_spec["disk"]
+    registry_host.patch_time = registry_host_spec["patch_time"]
+    registry_host.status = "updated"
+    registry_host.patching_log = {
+        "started_at": 0,
+        "finished_at": 0,
+    }
+    registry_base_station = BaseStation.find_by_id(registry_spec["base_station_id"])
+    registry_base_station._connect_to_edge_server(edge_server=registry_host)
+
+    # Updating the registry CPU and RAM demand to fill its host
+    registries[index]["cpu_demand"] = registry_host_spec["cpu"]
+    registries[index]["memory_demand"] = registry_host_spec["memory"]
+
+    # Creating the registry object
+    provision_container_registry(container_registry_specification=registries[index], server=registry_host)
+
 
 # 3GPP. “5G; Service requirements for the 5G system (3GPP TS 22.261 version 16.16.0 Release 16)”,
 # Technical specification (ts), 3rd Generation Partnership Project (3GPP), 2022, 72p.
-delay_slas = [15, 20, 30]
+# https://www.etsi.org/deliver/etsi_ts/122200_122299/122261/16.16.00_60/ts_122261v161600p.pdf
+delay_slas = [
+    15,  # Remote surgery (page 52)
+    20,  # Collaborative gaming (page 52)
+    # 25,  # Farm machinery operation (page 52)
+]
 service_demands = [
-    # {"cpu_demand": 1, "memory_demand": 1},
+    {"cpu_demand": 1, "memory_demand": 1},
     {"cpu_demand": 2, "memory_demand": 2},
     {"cpu_demand": 4, "memory_demand": 4},
+    {"cpu_demand": 6, "memory_demand": 6},
     {"cpu_demand": 8, "memory_demand": 8},
 ]
 
-# Defining service image specifications
-service_image_specifications = [
-    # {"state": 0, "image_name": "node", "layers": 8},
-    # {"state": 0, "image_name": "storm", "layers": 9},
-    # {"state": 0, "image_name": "erlang", "layers": 7},
-    {"state": 0, "image_name": "debian", "layers": 1},
-    {"state": 0, "image_name": "centos", "layers": 1},
-    # {"state": 0, "image_name": "archlinux", "layers": 1},
-    # {"state": 0, "image_name": "ibmjava", "layers": 3},
-    {"state": 0, "image_name": "nginx", "layers": 6},
-    {"state": 300, "image_name": "redis", "layers": 6},
-    # {"state": 200, "image_name": "telegraf", "layers": 6},
-    # {"state": 0, "image_name": "jetty", "layers": 6},
-    {"state": 0, "image_name": "tomcat", "layers": 7},
-    {"state": 0, "image_name": "ruby", "layers": 7},
-    {"state": 0, "image_name": "python", "layers": 7},
-    {"state": 400, "image_name": "mongo", "layers": 9},
-]
-SERVICES_PER_SPEC = 3
+
+SERVICES_PER_SPEC = 5
 TOTAL_SERVICES = len(service_image_specifications) * SERVICES_PER_SPEC
 service_image_specification_values = uniform(n_items=TOTAL_SERVICES, valid_values=service_image_specifications)
 
@@ -388,13 +428,20 @@ for container_layer in ContainerLayer.all():
 # Calculating the network delay between users and edge servers (useful for defining reasonable delay SLAs)
 users = []
 for user in User.all():
-    user_metadata = {"object": user, "all_delays": []}
+    user_metadata = {
+        "object": user,
+        "sla": user.delay_slas[str(user.applications[0].id)],
+        "all_delays": [],
+        "hosts_that_meet_the_sla": [],
+    }
     edge_servers = []
     for edge_server in EdgeServer.all():
-        path = nx.shortest_path(
-            G=Topology.first(), source=user.base_station.network_switch, target=edge_server.network_switch, weight="delay"
-        )
-        user_metadata["all_delays"].append(Topology.first().calculate_path_delay(path=path))
+        path = nx.shortest_path(G=Topology.first(), source=user.base_station.network_switch, target=edge_server.network_switch, weight="delay")
+        path_delay = Topology.first().calculate_path_delay(path=path)
+        user_metadata["all_delays"].append(path_delay)
+        if user_metadata["sla"] >= path_delay:
+            user_metadata["hosts_that_meet_the_sla"].append(edge_server)
+
     user_metadata["min_delay"] = min(user_metadata["all_delays"])
     user_metadata["max_delay"] = max(user_metadata["all_delays"])
     user_metadata["avg_delay"] = sum(user_metadata["all_delays"]) / len(user_metadata["all_delays"])
@@ -408,11 +455,12 @@ print("\n\n")
 print("=================================================================")
 print("==== NETWORK DISTANCE (DELAY) BETWEEN USERS AND EDGE SERVERS ====")
 print("=================================================================")
-users = sorted(users, key=lambda user_metadata: user_metadata["object"].delay_slas[str(user_metadata["object"].applications[0].id)])
+users = sorted(users, key=lambda user_metadata: (user_metadata["sla"], len(user_metadata["hosts_that_meet_the_sla"])))
 for user_metadata in users:
     user_attrs = {
         "object": user_metadata["object"],
         "sla": user_metadata["object"].delay_slas[str(user_metadata["object"].applications[0].id)],
+        "hosts_that_meet_the_sla": len(user_metadata["hosts_that_meet_the_sla"]),
         "min": user_metadata["min_delay"],
         "max": user_metadata["max_delay"],
         "avg": round(user_metadata["avg_delay"]),
@@ -421,6 +469,8 @@ for user_metadata in users:
     print(f"{user_attrs}")
     if user_attrs["min"] > user_attrs["sla"]:
         print(f"\n\n\n\nWARNING: {user_attrs['object']} delay SLA is not achievable!\n\n\n\n")
+    if user_attrs["max"] <= user_attrs["sla"]:
+        print(f"\n\n\n\nWARNING: {user_attrs['object']} delay SLA is achievable by any edge server!\n\n\n\n")
 
 # Calculating the infrastructure occupation and information about the services
 edge_server_cpu_capacity = 0
@@ -429,8 +479,9 @@ service_cpu_demand = 0
 service_memory_demand = 0
 
 for edge_server in EdgeServer.all():
-    edge_server_cpu_capacity += edge_server.cpu
-    edge_server_memory_capacity += edge_server.memory
+    if len(edge_server.container_registries) == 0:
+        edge_server_cpu_capacity += edge_server.cpu
+        edge_server_memory_capacity += edge_server.memory
 
 for service in Service.all():
     service_cpu_demand += service.cpu_demand

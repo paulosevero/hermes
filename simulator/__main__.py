@@ -38,7 +38,7 @@ def main(seed_value: int, algorithm: str, dataset: str, parameters: dict = {}):
         stopping_criterion=maintenance_stopping_criterion,
         resource_management_algorithm=eval(algorithm),
         resource_management_algorithm_parameters=parameters,
-        dump_interval=500,
+        dump_interval=10000,
         logs_directory=f"logs/algorithm={algorithm};{parameters_string}",
         user_defined_functions=[immobile],
     )
@@ -52,7 +52,9 @@ def main(seed_value: int, algorithm: str, dataset: str, parameters: dict = {}):
         for s in EdgeServer.all():
             c = [s.cpu, s.memory, s.disk]
             d = [s.cpu_demand, s.memory_demand, s.disk_demand]
-            print(f"{s}. Capacity: {c}. Demand: {d}. Services: {s.services}. Registries: {s.container_registries}")
+            svs = [svs.id for svs in s.services]
+            regs = [reg.id for reg in s.container_registries]
+            print(f"{s}. Capacity: {c}. Demand: {d}. Services: {svs}. Registries: {regs}")
         print("\n\n\n")
 
     # Executing the simulation
@@ -75,6 +77,32 @@ def main(seed_value: int, algorithm: str, dataset: str, parameters: dict = {}):
             "sizes_of_uncached_layers",
             "migration_times",
         ]
+        ONLY_DISPLAY_BATCH_TIME_RELATED_METRICS = True
+        batch_time_related_metrics = [
+            {"original_name": "max_wait_times", "new_name": "WAIT"},
+            {"original_name": "max_pulling_times", "new_name": "PULL"},
+            {"original_name": "max_state_migration_times", "new_name": "STAT"},
+        ]
+
+        print("=== MIGRATIONS ===")
+        migrations = []
+        for service in Service.all():
+            for migration in service._Service__migrations:
+                migration_metadata = {
+                    "Batch": migration["maintenance_batch"],
+                    "Duration": migration["end"] - migration["start"],
+                    "WAIT": migration["waiting_time"],
+                    "PULL": migration["pulling_layers_time"],
+                    "STAT": migration["migrating_service_state_time"],
+                    "Hits": migration["cache_hits"],
+                    "Misses": migration["cache_misses"],
+                    "Size cached layers": sum(migration["sizes_of_cached_layers"]),
+                    "Size uncached layers": sum(migration["sizes_of_uncached_layers"]),
+                }
+                migrations.append(migration_metadata)
+        migrations = sorted(migrations, key=lambda m: (m["Batch"], m["Duration"]))
+        for migration in migrations:
+            print(f"\t{migration}")
 
         print("=== OVERALL ===")
         overall_metrics = simulator.model_metrics["overall"]
@@ -86,7 +114,12 @@ def main(seed_value: int, algorithm: str, dataset: str, parameters: dict = {}):
         print("\n=== PER BATCH ===")
         per_batch_metrics = simulator.model_metrics["per_batch"]
         for key, value in per_batch_metrics.items():
-            print(f"{key}: {value}")
+            if ONLY_DISPLAY_BATCH_TIME_RELATED_METRICS:
+                if any(key == metric_name["original_name"] for metric_name in batch_time_related_metrics):
+                    metric_name = [metric["new_name"] for metric in batch_time_related_metrics if metric["original_name"] == key][0]
+                    print(f"{metric_name}: {value}")
+            else:
+                print(f"{key}: {value}")
 
 
 if __name__ == "__main__":
