@@ -652,7 +652,8 @@ def get_migration_plan(pop_size, cross_prob, mut_prob, n_gen) -> list:
         key=lambda s: (
             s["Penalty"],
             s["Norm Outdated Servers Used"],
-            s["Norm Max. Migration Time"] + s["Norm SLA Violations"],
+            s["Norm Max. Migration Time"],
+            s["Norm SLA Violations"],
         ),
     )
 

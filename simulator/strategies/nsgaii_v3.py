@@ -606,7 +606,7 @@ def get_migration_plan(pop_size, cross_prob, mut_prob, n_gen) -> list:
         method,
         termination=("n_gen", n_gen),
         seed=1,
-        verbose=True,
+        verbose=VERBOSE,
         display=MyDisplay(),
     )
 
