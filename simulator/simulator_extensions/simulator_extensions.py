@@ -239,11 +239,18 @@ def simulator_dump_data_to_disk(self, clean_data_in_memory: bool = True) -> None
             if clean_data_in_memory:
                 value = []
 
+    # Consolidating collected simulation metrics
+    metrics = {}
+    for metric_name, metric_value in self.model_metrics["overall"].items():
+        metrics[f"overall_{metric_name}"] = metric_value
+    for metric_name, metric_value in self.model_metrics["per_batch"].items():
+        metrics[f"per_batch_{metric_name}"] = metric_value
+
     # Saving general simulation metrics in a CSV file
     with open(f"{self.logs_directory}/general_simulation_metrics.csv", "w") as csvfile:
-        writer = csv.DictWriter(csvfile, fieldnames=self.model_metrics.keys())
+        writer = csv.DictWriter(csvfile, fieldnames=metrics.keys())
         writer.writeheader()
-        writer.writerows([self.model_metrics])
+        writer.writerows([metrics])
 
 
 def collect_simulation_metrics(simulator: object):
@@ -426,6 +433,12 @@ def collect_simulation_metrics(simulator: object):
         maintenance_batches = simulator.maintenance_batches
         maintenance_time = simulator.schedule.steps
 
+        # NSGA-II parameters
+        pop_size = simulator.resource_management_algorithm_parameters["pop_size"]
+        cross_prob = simulator.resource_management_algorithm_parameters["cross_prob"]
+        mut_prob = simulator.resource_management_algorithm_parameters["mut_prob"]
+        n_gen = simulator.resource_management_algorithm_parameters["n_gen"]
+
         overall_delay_sla_violations = sum(simulator.model_metrics["per_batch"]["delay_sla_violations"])
         number_of_migrations = sum([len(s._Service__migrations) for s in Service.all()])
 
@@ -467,10 +480,16 @@ def collect_simulation_metrics(simulator: object):
             simulator.model_metrics["overall"] = {}
 
         simulator.model_metrics["overall"]["algorithm"] = algorithm
+        simulator.model_metrics["overall"]["execution_time"] = execution_time
         simulator.model_metrics["overall"]["invalid_solution"] = invalid_solution
         simulator.model_metrics["overall"]["penalty"] = penalty
         simulator.model_metrics["overall"]["overall_overloaded_edge_servers"] = overall_overloaded_edge_servers
-        simulator.model_metrics["overall"]["execution_time"] = execution_time
+
+        simulator.model_metrics["overall"]["pop_size"] = pop_size
+        simulator.model_metrics["overall"]["cross_prob"] = cross_prob
+        simulator.model_metrics["overall"]["mut_prob"] = mut_prob
+        simulator.model_metrics["overall"]["n_gen"] = n_gen
+
         simulator.model_metrics["overall"]["maintenance_batches"] = maintenance_batches
         simulator.model_metrics["overall"]["maintenance_time"] = maintenance_time
         simulator.model_metrics["overall"]["cache_hits"] = cache_hits

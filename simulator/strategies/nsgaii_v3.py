@@ -151,6 +151,10 @@ class Flow:
 
         for i in range(0, len(self.path) - 1):
             link = topology[self.path[i]][self.path[i + 1]]
+
+            if "simulated_active_flows" not in link:
+                link["simulated_active_flows"] = []
+
             link["simulated_active_flows"].append(self)
 
         Flow.instances.append(self)
@@ -173,7 +177,7 @@ class Flow:
         """Method that executes the events involving the object at each time step."""
         if self.status == "active":
             # Updating the flow progress according to the available bandwidth
-            if not any([bw == None for bw in self.bandwidth.values()]):
+            if len(self.bandwidth.values()) > 0 and not any([bw == None for bw in self.bandwidth.values()]):
                 self.data_to_transfer -= min(self.bandwidth.values())
 
             if self.data_to_transfer <= 0:
@@ -195,6 +199,11 @@ class Flow:
                 if self.metadata["type"] == "layer":
                     # Removing the flow from its target host's download queue
                     self.target.simulated_download_queue.remove(self)
+                    self.target.simulated_downloaded_layer_digests.append(self.metadata["object"].digest)
+
+                elif self.metadata["type"] == "service_state":
+                    self.metadata["object"].simulated_migrations[-1]["status"] = "finished"
+                    self.metadata["object"].simulated_migrations[-1]["duration"] = current_time_step
 
 
 class MyDisplay(Display):
@@ -211,8 +220,8 @@ class MyDisplay(Display):
         super()._do(problem, evaluator, algorithm)
 
         # Aggregating fitness values
-        min_outdated_capacity_being_used = int(np.min(algorithm.pop.get("F")[:, 0]))
-        max_outdated_capacity_being_used = int(np.max(algorithm.pop.get("F")[:, 0]))
+        min_outdated_servers_being_used = int(np.min(algorithm.pop.get("F")[:, 0]))
+        max_outdated_servers_being_used = int(np.max(algorithm.pop.get("F")[:, 0]))
 
         min_time_spent_relocating_services = int(np.min(algorithm.pop.get("F")[:, 1]))
         max_time_spent_relocating_services = int(np.max(algorithm.pop.get("F")[:, 1]))
@@ -223,8 +232,8 @@ class MyDisplay(Display):
         # Aggregating penalties
         penalty = int(np.min(algorithm.pop.get("CV")[:, 0]))
 
-        self.output.append("MIN_OUTD", min_outdated_capacity_being_used)
-        self.output.append("MAX_OUTD", max_outdated_capacity_being_used)
+        self.output.append("MIN_OUTD", min_outdated_servers_being_used)
+        self.output.append("MAX_OUTD", max_outdated_servers_being_used)
         self.output.append("MIN_MIGR", min_time_spent_relocating_services)
         self.output.append("MAX_MIGR", max_time_spent_relocating_services)
         self.output.append("MIN_SLAV", min_delay_sla_violations)
@@ -262,20 +271,26 @@ class PlacementProblem(Problem):
         out["G"] = np.array([item[1] for item in output])
 
     def calculate_maximum_time_spent_relocating_services(self, solution):
-        ########################################################################
-        #### Creating a data structure to hold the layer provisioning times ####
-        ########################################################################
+        ###################################################################################################
+        #### Creating a data structure to hold the layer provisioning times and spawning initial flows ####
+        ###################################################################################################
         topology = EdgeServer.first().model.topology
         services_being_migrated = []
-        edge_servers_download_list = {}
         target_servers = []
+
+        for server_id in solution:
+            server = EdgeServer._instances[server_id - 1]
+            server.simulated_downloaded_layer_digests = [layer.digest for layer in server.container_layers]
+            server.simulated_download_queue = []
+            server.simulated_waiting_queue = []
+
         for service_id, server_id in enumerate(solution):
             server = EdgeServer._instances[server_id - 1]
             service = self.services_to_migrate[service_id]
 
             # Checking if the solution is suggesting the service migration
             if service.server != server:
-                target_servers.append(server)
+                service_image = ContainerImage.find_by(attribute_name="digest", attribute_value=service.image_digest)
 
                 if not hasattr(service, "simulated_migrations"):
                     service.simulated_migrations = []
@@ -283,75 +298,60 @@ class PlacementProblem(Problem):
                     {
                         "origin": service.server,
                         "target": server,
-                        "waiting_time": 0,
-                        "pulling_layers_time": 0,
-                        "migrating_service_state_time": 0,
+                        "duration": None,
+                        "status": "pulling_layers",
+                        "layers": service_image.layers_digests,
                     }
                 )
                 services_being_migrated.append(service)
+                target_servers.append(server)
 
-                # Gathering the service's container image
-                service_image = ContainerImage.find_by(attribute_name="digest", attribute_value=service.image_digest)
-
-                if str(server.id) not in edge_servers_download_list:
-                    edge_servers_download_list[server.id] = []
+                # Gathering the list of container layers that are cached or about to be cached by the candidate server
+                layers_downloaded = list(server.simulated_downloaded_layer_digests)
+                layers_on_download_queue = [flow.metadata["object"].digest for flow in server.simulated_download_queue]
+                layers_on_waiting_queue = [flow.metadata["object"].digest for flow in server.simulated_waiting_queue]
+                server_layers = layers_downloaded + layers_on_download_queue + layers_on_waiting_queue
 
                 # Adding the service layers to the list of layers that must be downloaded in the target host
                 for layer_digest in service_image.layers_digests:
-                    if layer_digest not in edge_servers_download_list[server.id]:
-                        edge_servers_download_list[server.id].append(layer_digest)
+                    if layer_digest not in server_layers:
+                        layer = ContainerLayer.find_by(attribute_name="digest", attribute_value=layer_digest)
+                        registry_metadata = find_closest_registry(server, layer)
+                        flow = Flow(
+                            topology=topology,
+                            started_at=0,
+                            source=registry_metadata["registry"],
+                            target=server,
+                            path=registry_metadata["path"],
+                            data_to_transfer=layer.size,
+                            metadata={"type": "layer", "object": layer, "registry": registry_metadata["registry"]},
+                        )
+
+                        if len(server.simulated_download_queue) < server.max_concurrent_layer_downloads:
+                            server.simulated_download_queue.append(flow)
+                            flow.status = "active"
+                        else:
+                            server.simulated_waiting_queue.append(flow)
+                            flow.status = "waiting"
 
         if VERBOSE:
             print("==== SERVICES TO MIGRATE ====")
             for service in services_being_migrated:
-                print(f"\t{service}")
-            print("==== DOWNLOAD LIST =====")
-            for server_id, download_list in edge_servers_download_list.items():
-                server = EdgeServer.find_by_id(server_id)
-                print(f"\t{server}. Download List: {download_list}")
+                target_server = service.simulated_migrations[-1]["target"]
+                service_metadata = {
+                    "status": service.simulated_migrations[-1]["status"],
+                    "layers": [digest[7:12] for digest in service.simulated_migrations[-1]["layers"]],
+                }
+                target_host_metadata = {
+                    "cach": [digest[7:12] for digest in target_server.simulated_downloaded_layer_digests],
+                    "down": [flow.metadata["object"].digest[7:12] for flow in target_server.simulated_download_queue],
+                    "wait": [flow.metadata["object"].digest[7:12] for flow in target_server.simulated_waiting_queue],
+                }
+                print(f"\t{service}. {service_metadata}")
+                print(f"\t\t{target_server}. {target_host_metadata}")
+                print()
+
             print("\n\n")
-
-        ################################
-        #### Creating network flows ####
-        ################################
-        for server_id, download_list in edge_servers_download_list.items():
-            server = EdgeServer.find_by_id(server_id)
-            server.simulated_download_queue = []
-            server.simulated_waiting_queue = []
-
-            for layer_digest in download_list:
-                layer = ContainerLayer.find_by(attribute_name="digest", attribute_value=layer_digest)
-                registry_metadata = find_closest_registry(server, layer)
-
-                flow = Flow(
-                    topology=topology,
-                    started_at=0,
-                    target=server,
-                    source=registry_metadata["registry"],
-                    path=registry_metadata["path"],
-                    data_to_transfer=layer.size,
-                    metadata={"type": "layer", "object": layer, "registry": registry_metadata["registry"]},
-                )
-
-                if VERBOSE:
-                    print(
-                        f"\tCreated {flow}. Path: {flow.path}. FROM-TO: {[server, registry_metadata['registry'].server]}. Size: {flow.data_to_transfer}. Metadata: {flow.metadata}"
-                    )
-
-                # If the target server hosts a registry with the layer, no download is necessary so the flow is immediately finished
-                if len(flow.path) == 1:
-                    flow.status = "finished"
-                    flow.ended_at = 0
-                else:
-                    if len(server.simulated_download_queue) < server.max_concurrent_layer_downloads:
-                        server.simulated_download_queue.append(flow)
-                        flow.status = "active"
-                    else:
-                        server.simulated_waiting_queue.append(flow)
-                        flow.status = "waiting"
-
-            if VERBOSE:
-                print(f"{server}. Download Queue: {server.simulated_download_queue}. Waiting Queue: {server.simulated_waiting_queue}")
 
         ###############################################
         #### Simulating the migration progressions ####
@@ -361,7 +361,18 @@ class PlacementProblem(Problem):
             time_step += 1
 
             if VERBOSE:
-                print(f"\n=== TIME STEP {time_step} ===")
+                print(f"\n=== TIME STEP {time_step}. ACTIVE FLOWS: {sum([1 for flow in Flow.all() if flow.status != 'finished'])} ===")
+                for flow in Flow.all():
+                    if flow.status != "finished":
+                        flow_metadata = {
+                            "started_at": flow.started_at,
+                            "target": flow.target,
+                            "status": flow.status,
+                            "path": [switch.id for switch in flow.path],
+                            "data_to_transfer": flow.data_to_transfer,
+                            "metadata": flow.metadata,
+                        }
+                        print(f"{flow_metadata}")
 
             # Gathering the links of used by flows that either started or finished or that have more bandwidth than needed
             links_to_recalculate_bandwidth = []
@@ -369,14 +380,10 @@ class PlacementProblem(Problem):
                 if flow.status == "active":
                     flow_just_started = flow.started_at == time_step - 1
                     flow_just_ended = flow.ended_at == time_step - 1
-                    flow_wasting_bandwidth = (
-                        False if flow_just_started else any([flow.data_to_transfer < bw for bw in flow.bandwidth.values()])
-                    )
+                    flow_wasting_bandwidth = False if flow_just_started else any([flow.data_to_transfer < bw for bw in flow.bandwidth.values()])
 
                     if VERBOSE:
-                        print(
-                            f"\t{flow}. just started: {flow_just_started}. just ended: {flow_just_ended}. wasting bw: {flow_wasting_bandwidth}"
-                        )
+                        print(f"\t{flow}. just started: {flow_just_started}. just ended: {flow_just_ended}. wasting bw: {flow_wasting_bandwidth}")
 
                     if flow_just_started or flow_just_ended or flow_wasting_bandwidth:
                         for i in range(0, len(flow.path) - 1):
@@ -427,28 +434,59 @@ class PlacementProblem(Problem):
                     edge_server.simulated_download_queue.append(flow)
                     flow.status = "active"
 
+            # Updating the migration states and starting service state migration flows if necessary
+            for service in services_being_migrated:
+                migration = service.simulated_migrations[-1]
+                target_host = migration["target"]
+
+                if migration["status"] == "pulling_layers":
+                    downloaded_layers = [1 for layer_digest in migration["layers"] if layer_digest in target_host.simulated_downloaded_layer_digests]
+
+                    if sum(downloaded_layers) == len(migration["layers"]):
+                        if service.state == 0:
+                            migration["duration"] = time_step
+                            migration["status"] = "finished"
+                        else:
+                            migration["status"] = "migrating_service_state"
+                            path = nx.shortest_path(
+                                G=server.model.topology,
+                                source=service.server.base_station.network_switch,
+                                target=target_host.base_station.network_switch,
+                            )
+                            flow = Flow(
+                                topology=topology,
+                                started_at=time_step,
+                                source=service.server,
+                                target=target_host,
+                                path=path,
+                                data_to_transfer=service.state,
+                                metadata={"type": "service_state", "object": service},
+                            )
+                            flow.status = "active"
+
         ########################################################
         #### Calculating the time spent relocating services ####
         ########################################################
+        if VERBOSE:
+            print(f"==== SERVICE MIGRATIONS ====")
+
         maximum_time_spent_relocating_services = 0
 
-        if VERBOSE:
-            print("==== ALL FLOWS HAVE ENDED ====")
+        for service in services_being_migrated:
+            migration = service.simulated_migrations[-1]
 
-        for flow in Flow.all():
-            flow_metadata = {
-                "status": flow.status,
-                "data_to_transfer": flow.data_to_transfer,
-                "started_at": flow.started_at,
-                "ended_at": flow.ended_at,
-                "metadata": flow.metadata,
-            }
+            if "duration" in migration and migration["duration"] != None and migration["duration"] > maximum_time_spent_relocating_services:
+                maximum_time_spent_relocating_services = migration["duration"]
 
             if VERBOSE:
-                print(f"\t{flow}. {flow_metadata}")
-
-            if flow.ended_at > maximum_time_spent_relocating_services:
-                maximum_time_spent_relocating_services = flow.ended_at
+                migration_metadata = {
+                    "service": service,
+                    "status": service.simulated_migrations[-1]["status"],
+                    "from": service.server,
+                    "to": service.simulated_migrations[-1]["target"],
+                    "duration": service.simulated_migrations[-1]["duration"],
+                }
+                print(f"{migration_metadata}")
 
         ###################################
         #### Removing all Flow objects ####
@@ -459,6 +497,7 @@ class PlacementProblem(Problem):
             link["simulated_active_flows"] = []
 
         for edge_server in target_servers:
+            edge_server.simulated_downloaded_layer_digests = []
             edge_server.simulated_waiting_queue = []
             edge_server.simulated_download_queue = []
 
@@ -481,7 +520,8 @@ class PlacementProblem(Problem):
         ################################################################
         maximum_time_spent_relocating_services = self.calculate_maximum_time_spent_relocating_services(solution=solution)
 
-        outdated_capacity_being_used = 0
+        outdated_resources_being_used = 0
+        outdated_servers_prevented_from_being_drained = []
         delay_sla_violations = 0
         edge_servers_free_cpu_capacity = [edge_server.cpu - edge_server.cpu_demand for edge_server in EdgeServer.all()]
         edge_servers_free_ram_capacity = [edge_server.memory - edge_server.memory_demand for edge_server in EdgeServer.all()]
@@ -499,11 +539,11 @@ class PlacementProblem(Problem):
                 # edge_servers_free_cpu_capacity[service.server.id - 1] += service.cpu_demand
                 # edge_servers_free_ram_capacity[service.server.id - 1] += service.memory_demand
 
-            ####################################################################################
-            #### Calculating the number of outdated servers drained with the given solution ####
-            ####################################################################################
-            if server.status == "outdated":
-                outdated_capacity_being_used += get_normalized_demand(object=service)
+            #################################################################################################
+            #### Calculating the amount of resources from outdated servers is used by the given solution ####
+            #################################################################################################
+            if server.status == "outdated" and server not in outdated_servers_prevented_from_being_drained:
+                outdated_servers_prevented_from_being_drained.append(server)
 
             #######################################################################################
             #### Calculating the number of delay SLA violations incurred by the given solution ####
@@ -518,31 +558,32 @@ class PlacementProblem(Problem):
             if delay > delay_sla:
                 delay_sla_violations += 1
 
-        if VERBOSE:
-            print(f"SOLUTION: {solution}")
-            print(f"\tOutdated hosts being used: {outdated_capacity_being_used}")
-            print(f"\tMaximum time spent relocating services: {maximum_time_spent_relocating_services}")
-            print(f"\tSLA violations: {delay_sla_violations}")
-            print("")
-
         # Aggregating fitness values
-        outdated_capacity_being_used = (
-            outdated_capacity_being_used * 100 / sum([get_normalized_demand(s) for s in self.services_to_migrate])
+        max_outdated_capacity_prevented_from_being_drained = sum([get_normalized_capacity(s) for s in EdgeServer.all() if s.status == "outdated"])
+        outdated_capacity_prevented_from_being_drained = sum([get_normalized_capacity(s) for s in outdated_servers_prevented_from_being_drained])
+        outdated_capacity_prevented_from_being_drained = (
+            outdated_capacity_prevented_from_being_drained * 100 / max_outdated_capacity_prevented_from_being_drained
         )
-        fitness = (outdated_capacity_being_used, maximum_time_spent_relocating_services, delay_sla_violations)
+
+        fitness = (outdated_capacity_prevented_from_being_drained, maximum_time_spent_relocating_services, delay_sla_violations)
 
         # Aggregating penalties
         servers_with_overloaded_cpu_capacity = sum([1 for item in edge_servers_free_cpu_capacity if item < 0])
         servers_with_overloaded_ram_capacity = sum([1 for item in edge_servers_free_ram_capacity if item < 0])
         penalty = max(servers_with_overloaded_cpu_capacity, servers_with_overloaded_ram_capacity)
 
+        if VERBOSE:
+            print(f"SOLUTION: {solution}")
+            print(f"\tOutdated capacity prevented from being drained (%): {outdated_capacity_prevented_from_being_drained}")
+            print(f"\tMaximum time spent relocating services: {maximum_time_spent_relocating_services}")
+            print(f"\tSLA violations: {delay_sla_violations}")
+            print(f"\tPenalty: {penalty}")
+            print("")
+
         return (fitness, penalty)
 
 
 def get_migration_plan(pop_size, cross_prob, mut_prob, n_gen) -> list:
-    for link in NetworkLink.all():
-        link["simulated_active_flows"] = []
-
     # Defining the initial population
     services_to_migrate = [service for service in Service.all() if service.server.status == "outdated"]
 
@@ -582,22 +623,48 @@ def get_migration_plan(pop_size, cross_prob, mut_prob, n_gen) -> list:
         solutions.append(solution)
 
     # Gathering min and max values for each objective in the fitness function
-    min_outdated_servers_used = min([solution["Outdated Servers Used"] for solution in solutions])
-    max_outdated_servers_used = max([solution["Outdated Servers Used"] for solution in solutions])
-    min_migration_time = min([solution["Max. Migration Time"] for solution in solutions])
-    max_migration_time = max([solution["Max. Migration Time"] for solution in solutions])
-    min_sla_violations = min([solution["SLA Violations"] for solution in solutions])
-    max_sla_violations = max([solution["SLA Violations"] for solution in solutions])
+    min_and_max = find_minimum_and_maximum(metadata=solutions, nsgaii=True)
 
-    # Selecting the best maintenance plan found by the NSGA-II algorithm
+    # Calculating the normalized objective values for each solution
+    for solution in solutions:
+        solution["Norm Outdated Servers Used"] = get_norm(
+            metadata=solution,
+            attr_name="Outdated Servers Used",
+            min=min_and_max["minimum"],
+            max=min_and_max["maximum"],
+        )
+        solution["Norm Max. Migration Time"] = get_norm(
+            metadata=solution,
+            attr_name="Max. Migration Time",
+            min=min_and_max["minimum"],
+            max=min_and_max["maximum"],
+        )
+        solution["Norm SLA Violations"] = get_norm(
+            metadata=solution,
+            attr_name="SLA Violations",
+            min=min_and_max["minimum"],
+            max=min_and_max["maximum"],
+        )
+
+    # Selecting the best maintenance plan found by the NSGA-II algorithm. The sorting procedure employs the well-known
+    # equal weights normalization method: https://doi.org/10.1080/23311916.2018.1502242 (page 7)
     solutions = sorted(
         solutions,
-        key=lambda s: (s["Penalty"], s["Outdated Servers Used"], s["SLA Violations"], s["Max. Migration Time"]),
+        key=lambda s: (
+            s["Penalty"],
+            s["Norm Outdated Servers Used"] + s["Norm Max. Migration Time"] * (1 / 2) + s["Norm SLA Violations"] * (1 / 3),
+        ),
     )
 
     print("=== SOLUTIONS FOUND:")
     for solution in solutions:
-        print(f"\t{solution}")
+        solution_metadata = {
+            "Norm Outdated Servers Used": round(solution["Norm Outdated Servers Used"], 2),
+            "Norm SLA Violations": round(solution["Norm SLA Violations"], 2),
+            "Norm Max. Migration Time": round(solution["Norm Max. Migration Time"], 2),
+            "Overloaded Servers": solution["Penalty"],
+        }
+        print(f"\t{solution_metadata}")
 
     best_solution = solutions[0]["Migration Plan"]
 
@@ -607,9 +674,7 @@ def get_migration_plan(pop_size, cross_prob, mut_prob, n_gen) -> list:
 def nsgaii_v3(parameters: dict):
     # Patching outdated servers that were previously drained out (i.e., those that are not currently hosting any service)
     servers_to_patch = [
-        server
-        for server in EdgeServer.all()
-        if server.status == "outdated" and len(server.services) == 0 and len(server.container_registries) == 0
+        server for server in EdgeServer.all() if server.status == "outdated" and len(server.services) == 0 and len(server.container_registries) == 0
     ]
     if len(servers_to_patch) > 0:
         for server in servers_to_patch:

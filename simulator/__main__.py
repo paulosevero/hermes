@@ -12,6 +12,7 @@ from .strategies import *
 
 # Importing Python libraries
 from random import seed
+import time
 import argparse
 
 
@@ -24,9 +25,8 @@ def main(seed_value: int, algorithm: str, dataset: str, parameters: dict = {}):
 
     # Parsing NSGA-II parameters string
     parameters_string = ""
-    if algorithm == "nsgaii":
-        for key, value in parameters.items():
-            parameters_string += f"{key}={value};"
+    for key, value in parameters.items():
+        parameters_string += f"{key}={value};"
 
     # Loading EdgeSimPy extensions
     load_edgesimpy_extensions()
@@ -39,7 +39,7 @@ def main(seed_value: int, algorithm: str, dataset: str, parameters: dict = {}):
         resource_management_algorithm=eval(algorithm),
         resource_management_algorithm_parameters=parameters,
         dump_interval=10000,
-        logs_directory=f"logs/algorithm={algorithm};{parameters_string}",
+        logs_directory=f"logs/algorithm={algorithm};{int(time.time())};{parameters_string}",
         user_defined_functions=[immobile],
     )
     simulator.executing_nsgaii_runner = False

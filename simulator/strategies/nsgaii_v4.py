@@ -651,7 +651,8 @@ def get_migration_plan(pop_size, cross_prob, mut_prob, n_gen) -> list:
         solutions,
         key=lambda s: (
             s["Penalty"],
-            s["Norm Outdated Servers Used"] + s["Norm SLA Violations"] + s["Norm Max. Migration Time"],
+            s["Norm Outdated Servers Used"],
+            s["Norm Max. Migration Time"] + s["Norm SLA Violations"],
         ),
     )
 
@@ -670,7 +671,7 @@ def get_migration_plan(pop_size, cross_prob, mut_prob, n_gen) -> list:
     return best_solution
 
 
-def nsgaii_v2(parameters: dict):
+def nsgaii_v4(parameters: dict):
     # Patching outdated servers that were previously drained out (i.e., those that are not currently hosting any service)
     servers_to_patch = [
         server for server in EdgeServer.all() if server.status == "outdated" and len(server.services) == 0 and len(server.container_registries) == 0
