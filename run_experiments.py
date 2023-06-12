@@ -28,8 +28,8 @@ def run_simulation(dataset: str, algorithm: str, pop_size: int, n_gen: int, cros
 datasets = ["datasets/dataset1.json"]
 algorithms = ["nsgaii_v3"]
 
-population_sizes = [150, 200]
-number_of_generations = [1500, 1700, 1800, 1900, 2000, 2100, 2200, 2300, 2400, 2500, 2600, 2700, 2800, 2900, 3000]
+population_sizes = [200]
+number_of_generations = [100, 200, 300, 400, 500, 600, 700, 800, 900, 1000, 1100, 1200, 1300, 1400]
 crossover_probabilities = [1]
 mutation_probabilities = [0.1]
 

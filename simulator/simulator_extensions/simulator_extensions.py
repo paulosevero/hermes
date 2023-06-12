@@ -12,6 +12,7 @@ import msgpack
 
 
 ALGORITHMS_THAT_DISPLAY_METRICS_DURING_SIMULATION = ["hermes", "hermes_v2", "lamp_v2", "lamp", "salus", "greedy_least_batch"]
+SKIP_AGENT_MONITORING = True
 VERBOSE_METRICS_TO_HIDE = [
     "wait_times",
     "pulling_times",
@@ -166,8 +167,7 @@ def simulator_run_model(self):
     collect_simulation_metrics(simulator=self)
 
     # Dumps simulation data to the disk to make sure no metrics are discarded
-    if self.executing_nsgaii_runner == False:
-        self.dump_data_to_disk()
+    self.dump_data_to_disk()
     del self.agent_metrics
     self.agent_metrics = {}
 
@@ -211,15 +211,16 @@ def simulator_monitor(self):
     self.collect()
 
     # Collecting agent-level metrics
-    for agent in self.schedule._agents.values():
-        metrics = agent.collect()
+    if SKIP_AGENT_MONITORING == False:
+        for agent in self.schedule._agents.values():
+            metrics = agent.collect()
 
-        if metrics != {}:
-            if f"{agent.__class__.__name__}" not in self.agent_metrics:
-                self.agent_metrics[f"{agent.__class__.__name__}"] = []
+            if metrics != {}:
+                if f"{agent.__class__.__name__}" not in self.agent_metrics:
+                    self.agent_metrics[f"{agent.__class__.__name__}"] = []
 
-            metrics = {**{"Object": f"{agent}", "Time Step": self.schedule.steps}, **metrics}
-            self.agent_metrics[f"{agent.__class__.__name__}"].append(metrics)
+                metrics = {**{"Object": f"{agent}", "Time Step": self.schedule.steps}, **metrics}
+                self.agent_metrics[f"{agent.__class__.__name__}"].append(metrics)
 
 
 def simulator_dump_data_to_disk(self, clean_data_in_memory: bool = True) -> None:

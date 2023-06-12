@@ -1,6 +1,7 @@
 # Python libraries
 import os
 import csv
+import time
 
 
 def min_max_norm(x, min, max):
@@ -39,12 +40,12 @@ for result in results:
 
 # Finding minimum and maximum values
 minimum = {
-    "maintenance_time": float("inf"),
-    "overall_delay_sla_violations": float("inf"),
+    "overall_maintenance_time": float("inf"),
+    "overall_overall_delay_sla_violations": float("inf"),
 }
 maximum = {
-    "maintenance_time": float("-inf"),
-    "overall_delay_sla_violations": float("-inf"),
+    "overall_maintenance_time": float("-inf"),
+    "overall_overall_delay_sla_violations": float("-inf"),
 }
 for result in results:
     for metric in minimum.keys():
@@ -65,7 +66,7 @@ for result in results:
 
 
 # Exporting parsed results to a CSV file
-with open("overall_results.csv", "w", newline="") as f:
+with open(f"overall_results_{int(time.time())}.csv", "w", newline="") as f:
     writer = csv.DictWriter(f, fieldnames=results[0].keys())
     writer.writeheader()
     writer.writerows(results)

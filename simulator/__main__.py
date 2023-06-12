@@ -38,7 +38,7 @@ def main(seed_value: int, algorithm: str, dataset: str, parameters: dict = {}):
         stopping_criterion=maintenance_stopping_criterion,
         resource_management_algorithm=eval(algorithm),
         resource_management_algorithm_parameters=parameters,
-        dump_interval=10000,
+        dump_interval=float("inf"),
         logs_directory=f"logs/algorithm={algorithm};{int(time.time())};{parameters_string}",
         user_defined_functions=[immobile],
     )
