@@ -121,7 +121,7 @@ def sort_servers_to_drain() -> list:
                 service_image_size += layer.size
             container_image_sizes.append(service_image_size + service.state)
 
-        maximum_container_image_size = max(container_image_sizes)
+        avg_container_image_size = sum(container_image_sizes) / len(container_image_sizes)
 
         ################################
         #### SLA OF HOSTED SERVICES ####
@@ -132,7 +132,7 @@ def sort_servers_to_drain() -> list:
         server_metadata = {
             "object": server,
             "capacity": normalized_server_capacity,
-            "inversed_max_container_image_size": 1 / max(1, maximum_container_image_size),
+            "inversed_avg_container_image_size": 1 / max(1, avg_container_image_size),
             "slas_of_hosted_services": 1 / (sum(slas_of_hosted_services) / len(slas_of_hosted_services)),
         }
 
@@ -147,9 +147,9 @@ def sort_servers_to_drain() -> list:
             min=min_and_max["minimum"],
             max=min_and_max["maximum"],
         )
-        server_metadata["norm_inversed_max_container_image_size"] = get_norm(
+        server_metadata["norm_inversed_avg_container_image_size"] = get_norm(
             metadata=server_metadata,
-            attr_name="inversed_max_container_image_size",
+            attr_name="inversed_avg_container_image_size",
             min=min_and_max["minimum"],
             max=min_and_max["maximum"],
         )
@@ -162,7 +162,7 @@ def sort_servers_to_drain() -> list:
 
     servers_to_drain = sorted(
         servers_to_drain,
-        key=lambda server: server["norm_capacity"] + server["norm_inversed_max_container_image_size"] + server["norm_slas_of_hosted_services"],
+        key=lambda server: server["norm_capacity"] + server["norm_inversed_avg_container_image_size"] + server["norm_slas_of_hosted_services"],
         reverse=True,
     )
 
