@@ -15,4 +15,5 @@ from .nsgaii_v4 import nsgaii_v4
 # Proposed maintenance strategy
 from .hermes import hermes
 from .hermes_v2 import hermes_v2
+from .hermes_v3 import hermes_v3
 from .lamp_v2 import lamp_v2

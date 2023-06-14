@@ -82,6 +82,8 @@ def main(seed_value: int, algorithm: str, dataset: str, parameters: dict = {}):
             {"original_name": "max_wait_times", "new_name": "WAIT"},
             {"original_name": "max_pulling_times", "new_name": "PULL"},
             {"original_name": "max_state_migration_times", "new_name": "STAT"},
+            {"original_name": "max_migration_times", "new_name": "MIGR"},
+            {"original_name": "delay_sla_violations", "new_name": "SLAV"},
         ]
 
         print("=== MIGRATIONS ===")

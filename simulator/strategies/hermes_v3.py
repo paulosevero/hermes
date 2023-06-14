@@ -93,7 +93,7 @@ def sort_servers_to_drain() -> list:
     => CONSIDERED CRITERIA ===
     ==========================
         -> Servers with a larger capacity.
-        -> Servers hosting services based on smaller container images and with smaller states (preferentially stateless ones).
+        -> Servers hosting services based on smaller container images and with smaller states (preferentially those that have no states at all).
         -> Servers hosting services with less strict delay SLAs.
 
     Returns:
@@ -121,7 +121,7 @@ def sort_servers_to_drain() -> list:
                 service_image_size += layer.size
             container_image_sizes.append(service_image_size + service.state)
 
-        avg_container_image_size = sum(container_image_sizes) / len(container_image_sizes)
+        max_container_image_size = max(container_image_sizes)
 
         ################################
         #### SLA OF HOSTED SERVICES ####
@@ -132,7 +132,7 @@ def sort_servers_to_drain() -> list:
         server_metadata = {
             "object": server,
             "capacity": normalized_server_capacity,
-            "inversed_avg_container_image_size": 1 / max(1, avg_container_image_size),
+            "inversed_max_container_image_size": 1 / max(1, max_container_image_size),
             "slas_of_hosted_services": 1 / (sum(slas_of_hosted_services) / len(slas_of_hosted_services)),
         }
 
@@ -147,9 +147,9 @@ def sort_servers_to_drain() -> list:
             min=min_and_max["minimum"],
             max=min_and_max["maximum"],
         )
-        server_metadata["norm_inversed_avg_container_image_size"] = get_norm(
+        server_metadata["norm_inversed_max_container_image_size"] = get_norm(
             metadata=server_metadata,
-            attr_name="inversed_avg_container_image_size",
+            attr_name="inversed_max_container_image_size",
             min=min_and_max["minimum"],
             max=min_and_max["maximum"],
         )
@@ -162,7 +162,7 @@ def sort_servers_to_drain() -> list:
 
     servers_to_drain = sorted(
         servers_to_drain,
-        key=lambda server: server["norm_capacity"] + server["norm_inversed_avg_container_image_size"] + server["norm_slas_of_hosted_services"],
+        key=lambda server: server["norm_capacity"] + server["norm_inversed_max_container_image_size"] + server["norm_slas_of_hosted_services"],
         reverse=True,
     )
 
@@ -246,7 +246,7 @@ def sort_services_to_relocate(server: object) -> list:
 
     services_to_relocate = sorted(
         services_to_relocate,
-        key=lambda service: service["norm_inversed_delay_sla"] + service["norm_cache_relevance"] + service["norm_inversed_service_demand"],
+        key=lambda service: service["norm_inversed_delay_sla"] + service["norm_inversed_service_demand"],
         reverse=True,
     )
 
@@ -357,7 +357,7 @@ def sort_candidate_servers(service: object, candidate_servers: list) -> list:
     return sorted_candidate_servers
 
 
-def hermes_v2(parameters: dict = {}):
+def hermes_v3(parameters: dict = {}):
     """Layer-aware maintenance policy for edge computing infrastructures.
 
     Args:
