@@ -26,7 +26,8 @@ def main(seed_value: int, algorithm: str, dataset: str, parameters: dict = {}):
     # Parsing NSGA-II parameters string
     parameters_string = ""
     for key, value in parameters.items():
-        parameters_string += f"{key}={value};"
+        if key != "solution":
+            parameters_string += f"{key}={value};"
 
     # Loading EdgeSimPy extensions
     load_edgesimpy_extensions()
@@ -49,6 +50,8 @@ def main(seed_value: int, algorithm: str, dataset: str, parameters: dict = {}):
 
     if VERBOSE:
         print("==== INITIAL SCENARIO ====")
+        print(f"SERVICES: {Service.count()}")
+        print(f"EDGE SERVERS: {EdgeServer.count()}")
         for s in EdgeServer.all():
             c = [s.cpu, s.memory, s.disk]
             d = [s.cpu_demand, s.memory_demand, s.disk_demand]
@@ -76,6 +79,12 @@ def main(seed_value: int, algorithm: str, dataset: str, parameters: dict = {}):
             "sizes_of_cached_layers",
             "sizes_of_uncached_layers",
             "migration_times",
+            "all_number_of_layers_downloaded",
+            "all_number_of_layers_on_download_queue",
+            "all_number_of_layers_on_waiting_queue",
+            "all_sizes_of_layers_downloaded",
+            "all_sizes_of_layers_on_download_queue",
+            "all_sizes_of_layers_on_waiting_queue",
         ]
         ONLY_DISPLAY_BATCH_TIME_RELATED_METRICS = True
         batch_time_related_metrics = [
@@ -84,6 +93,23 @@ def main(seed_value: int, algorithm: str, dataset: str, parameters: dict = {}):
             {"original_name": "max_state_migration_times", "new_name": "STAT"},
             {"original_name": "max_migration_times", "new_name": "MIGR"},
             {"original_name": "delay_sla_violations", "new_name": "SLAV"},
+            {"original_name": "delay_sla_violations_per_sla", "new_name": "SLAV_PER_SLA"},
+            {"original_name": "relocations_per_sla", "new_name": "RELOCATIONS_PER_SLA"},
+            {"original_name": "relocations_per_state_size", "new_name": "RELOCATIONS_PER_STATE"},
+            {"original_name": "longest_migrations_duration", "new_name": "migr_duration"},
+            {"original_name": "longest_migrations_waiting_time", "new_name": "migr_waiting_time"},
+            {"original_name": "longest_migrations_pulling_layers_time", "new_name": "migr_pulling_layers_time"},
+            {"original_name": "longest_migrations_migrating_service_state_time", "new_name": "migr_migrating_service_state_time"},
+            {"original_name": "longest_migrations_cache_hits", "new_name": "migr_cache_hits"},
+            {"original_name": "longest_migrations_cache_misses", "new_name": "migr_cache_misses"},
+            {"original_name": "longest_migrations_sizes_of_cached_layers", "new_name": "migr_sizes_of_cached_layers"},
+            {"original_name": "longest_migrations_sizes_of_uncached_layers", "new_name": "migr_sizes_of_uncached_layers"},
+            {"original_name": "longest_migrations_sizes_of_layers_downloaded", "new_name": "migr_sizes_of_layers_downloaded"},
+            {"original_name": "longest_migrations_sizes_of_layers_on_download_queue", "new_name": "migr_sizes_of_layers_on_download_queue"},
+            {"original_name": "longest_migrations_sizes_of_layers_on_waiting_queue", "new_name": "migr_sizes_of_layers_on_waiting_queue"},
+            {"original_name": "longest_migrations_number_of_layers_downloaded", "new_name": "migr_number_of_layers_downloaded"},
+            {"original_name": "longest_migrations_number_of_layers_on_download_queue", "new_name": "migr_number_of_layers_on_download_queue"},
+            {"original_name": "longest_migrations_number_of_layers_on_waiting_queue", "new_name": "migr_number_of_layers_on_waiting_queue"},
         ]
 
         print("=== MIGRATIONS ===")
@@ -137,9 +163,9 @@ if __name__ == "__main__":
     parser.add_argument("--pop_size", "-p", help="Population size", default="0")
     parser.add_argument("--n_gen", "-g", help="Number of generations", default="0")
     parser.add_argument("--cross_prob", "-c", help="Crossover probability (0.0 to 1.0)", default="1")
-    parser.add_argument("--mut_prob", "-m", help="Mutation probability (0.0 to 1.0)", default="0")
+    parser.add_argument("--mut_prob", "-m", help="Mutation probability (0.0 to 1.0)", default="0.1")
     parser.add_argument("--maintenance-batches", "-b", help="Maintenance batches", default="0")
-    parser.add_argument("--solution", "-q", help="Predefined maintenance plan", default="[]")
+    parser.add_argument("--solution", "-q", help="Predefined maintenance plan", default="None")
 
     args = parser.parse_args()
 

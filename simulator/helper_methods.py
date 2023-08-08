@@ -16,7 +16,7 @@ import random
 
 def load_edgesimpy_extensions():
     # Loading EdgeSimPy extensions
-    Simulator.initialize = simulator_initialize
+    # Simulator.initialize = simulator_initialize
     Simulator.step = simulator_step
     Simulator.run_model = simulator_run_model
     Simulator.monitor = simulator_monitor
@@ -50,7 +50,7 @@ def display_topology(topology: object, output_filename: str = "topology"):
     for node in topology.nodes():
         positions[node] = node.coordinates
         node_labels[node] = node.id
-        node_size = 200 if any(user.coordinates == node.coordinates for user in User.all()) else 100
+        node_size = 400 if any(user.coordinates == node.coordinates for user in User.all()) else 100
         sizes.append(node_size)
 
         if len(node.base_station.edge_servers) > 0 and len(node.base_station.edge_servers[0].container_registries) > 0:
@@ -61,6 +61,8 @@ def display_topology(topology: object, output_filename: str = "topology"):
             colors.append("orange")
         elif len(node.base_station.edge_servers) > 0 and "Server 3" in node.base_station.edge_servers[0].model_name:
             colors.append("red")
+        elif len(node.base_station.edge_servers) > 0 and "Server 4" in node.base_station.edge_servers[0].model_name:
+            colors.append("pink")
         else:
             colors.append("gray")
 
@@ -195,38 +197,22 @@ def find_minimum_and_maximum(metadata: list, nsgaii=False):
             for attr_name, attr_value in metadata_item.items():
                 if attr_name != "object":
                     # Updating the attribute's minimum value
-                    if (
-                        attr_name not in min_and_max["minimum"]
-                        or attr_name in min_and_max["minimum"]
-                        and attr_value < min_and_max["minimum"][attr_name]
-                    ):
+                    if attr_name not in min_and_max["minimum"] or attr_name in min_and_max["minimum"] and attr_value < min_and_max["minimum"][attr_name]:
                         min_and_max["minimum"][attr_name] = attr_value
 
                     # Updating the attribute's maximum value
-                    if (
-                        attr_name not in min_and_max["maximum"]
-                        or attr_name in min_and_max["maximum"]
-                        and attr_value > min_and_max["maximum"][attr_name]
-                    ):
+                    if attr_name not in min_and_max["maximum"] or attr_name in min_and_max["maximum"] and attr_value > min_and_max["maximum"][attr_name]:
                         min_and_max["maximum"][attr_name] = attr_value
     else:
         for metadata_item in metadata:
             for attr_name, attr_value in metadata_item.items():
                 if attr_name != "Migration Plan":
                     # Updating the attribute's minimum value
-                    if (
-                        attr_name not in min_and_max["minimum"]
-                        or attr_name in min_and_max["minimum"]
-                        and attr_value < min_and_max["minimum"][attr_name]
-                    ):
+                    if attr_name not in min_and_max["minimum"] or attr_name in min_and_max["minimum"] and attr_value < min_and_max["minimum"][attr_name]:
                         min_and_max["minimum"][attr_name] = attr_value
 
                     # Updating the attribute's maximum value
-                    if (
-                        attr_name not in min_and_max["maximum"]
-                        or attr_name in min_and_max["maximum"]
-                        and attr_value > min_and_max["maximum"][attr_name]
-                    ):
+                    if attr_name not in min_and_max["maximum"] or attr_name in min_and_max["maximum"] and attr_value > min_and_max["maximum"][attr_name]:
                         min_and_max["maximum"][attr_name] = attr_value
 
     return min_and_max

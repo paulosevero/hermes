@@ -92,11 +92,9 @@ def sort_servers_to_drain() -> list:
     ==========================
     => CONSIDERED CRITERIA ===
     ==========================
-        -> Servers with a larger capacity
-        -> Servers with lower CPU/RAM demand
-        -> Servers hosting stateless services
-        -> Servers with a larger amount of popular layers in their cache
-            -> Layer Size + Number of services using that layer that are hosted by third-party outdated servers
+        -> Servers with a larger capacity.
+        -> Servers hosting services based on smaller container images and with smaller states (preferentially those that have no states at all).
+        -> Servers hosting services with less strict delay SLAs.
 
     Returns:
         servers_to_drain (list): Sorted list of outdated servers to be drained.
@@ -110,39 +108,20 @@ def sort_servers_to_drain() -> list:
         #########################
         normalized_server_capacity = get_normalized_capacity(object=server)
 
-        #######################
-        #### SERVER DEMAND ####
-        #######################
-        normalized_server_demand = get_normalized_demand(object=server)
-
-        ###################################################
-        #### AGGREGATED STATE SIZE FROM HOSTED SERVERS ####
-        ###################################################
-        aggregated_size_of_service_states = sum([service.state for service in server.services])
-
-        #########################
-        #### CACHE RELEVANCE ####
-        #########################
-        # Gathering the list of unique layers that compose the services hosted by the server
-        layers_digests = []
+        ##################################
+        #### SIZE OF CONTAINER IMAGES ####
+        ##################################
+        # Gathering the size of container images that compose the services hosted by the server
+        container_image_sizes = []
         for service in server.services:
+            service_image_size = 0
             image = ContainerImage.find_by(attribute_name="digest", attribute_value=service.image_digest)
             for layer_digest in image.layers_digests:
-                if layer_digest not in layers_digests:
-                    layers_digests.append(layer_digest)
+                layer = ContainerLayer.find_by(attribute_name="digest", attribute_value=layer_digest)
+                service_image_size += layer.size
+            container_image_sizes.append(service_image_size + service.state)
 
-        layers = [ContainerLayer.find_by(attribute_name="digest", attribute_value=digest) for digest in layers_digests]
-
-        # Gathering the list of services hosted by third-party outdated servers
-        services_hosted_by_other_outdated_servers = [
-            svs for svs in Service.all() if svs.server != server and svs.server.status == "outdated"
-        ]
-
-        # Calculating the server's cache relevance based on the size of its layers and
-        # on how many services hosted by third-party outdated servers use these layers
-        cache_relevance = calculate_cache_relevance_score(
-            layers_to_analyze=layers, services_of_interest=services_hosted_by_other_outdated_servers
-        )
+        sum_container_image_size = sum(container_image_sizes)
 
         ################################
         #### SLA OF HOSTED SERVICES ####
@@ -153,10 +132,8 @@ def sort_servers_to_drain() -> list:
         server_metadata = {
             "object": server,
             "capacity": normalized_server_capacity,
-            "inversed_demand": 1 / max(1, normalized_server_demand),
-            "inversed_service_states": 1 / max(1, aggregated_size_of_service_states),
-            "cache_relevance": cache_relevance,
-            "slas_of_hosted_services": 1 / (sum(slas_of_hosted_services) / len(slas_of_hosted_services)),
+            "inversed_sum_container_image_size": 1 / max(1, sum_container_image_size),
+            "avg_service_slas": sum(slas_of_hosted_services) / max(1, len(slas_of_hosted_services)),
         }
 
         servers_to_drain.append(server_metadata)
@@ -170,34 +147,22 @@ def sort_servers_to_drain() -> list:
             min=min_and_max["minimum"],
             max=min_and_max["maximum"],
         )
-        server_metadata["norm_inversed_demand"] = get_norm(
+        server_metadata["norm_inversed_sum_container_image_size"] = get_norm(
             metadata=server_metadata,
-            attr_name="inversed_demand",
+            attr_name="inversed_sum_container_image_size",
             min=min_and_max["minimum"],
             max=min_and_max["maximum"],
         )
-        server_metadata["norm_inversed_service_states"] = get_norm(
+        server_metadata["norm_avg_service_slas"] = get_norm(
             metadata=server_metadata,
-            attr_name="inversed_service_states",
-            min=min_and_max["minimum"],
-            max=min_and_max["maximum"],
-        )
-        server_metadata["norm_cache_relevance"] = get_norm(
-            metadata=server_metadata,
-            attr_name="cache_relevance",
-            min=min_and_max["minimum"],
-            max=min_and_max["maximum"],
-        )
-        server_metadata["norm_slas_of_hosted_services"] = get_norm(
-            metadata=server_metadata,
-            attr_name="slas_of_hosted_services",
+            attr_name="avg_service_slas",
             min=min_and_max["minimum"],
             max=min_and_max["maximum"],
         )
 
     servers_to_drain = sorted(
         servers_to_drain,
-        key=lambda server: server["norm_capacity"] + server["norm_cache_relevance"] + server["norm_slas_of_hosted_services"],
+        key=lambda server: server["norm_capacity"] + server["norm_inversed_sum_container_image_size"] + server["norm_avg_service_slas"],
         reverse=True,
     )
 
@@ -211,9 +176,9 @@ def sort_services_to_relocate(server: object) -> list:
     ==========================
     => CONSIDERED CRITERIA ===
     ==========================
-        -> 1. Services with tight delay SLA
-        -> 2. Services based on images with layers used by co-hosted services
-        -> 3. Services with low CPU/RAM demand
+        -> Services with more strict delay SLAs.
+        -> Services based on images with layers used by co-hosted services.
+        -> Services with low CPU/RAM demand.
 
     Args:
         server (object): Server being drained.
@@ -230,20 +195,6 @@ def sort_services_to_relocate(server: object) -> list:
         ###################
         inversed_delay_sla = 1 / get_service_delay_sla(service=service)
 
-        ####################################################
-        #### LAYER POPULARITY WITHIN CO-HOSTED SERVICES ####
-        ####################################################
-        # Gathering the list of layers that compose the service's image
-        service_image = ContainerImage.find_by(attribute_name="digest", attribute_value=service.image_digest)
-        service_layers = [
-            ContainerLayer.find_by(attribute_name="digest", attribute_value=digest) for digest in service_image.layers_digests
-        ]
-
-        # Calculating the relevance of layers used by the service based
-        # on their size and on how many co-hosted services use them
-        co_hosted_services = [svs for svs in server.services if svs != service]
-        cache_relevance = calculate_cache_relevance_score(layers_to_analyze=service_layers, services_of_interest=co_hosted_services)
-
         ########################
         #### SERVICE DEMAND ####
         ########################
@@ -253,7 +204,6 @@ def sort_services_to_relocate(server: object) -> list:
         service_metadata = {
             "object": service,
             "inversed_delay_sla": inversed_delay_sla,
-            "cache_relevance": cache_relevance,
             "inversed_service_demand": 1 / service_demand,
         }
 
@@ -268,12 +218,6 @@ def sort_services_to_relocate(server: object) -> list:
             min=min_and_max["minimum"],
             max=min_and_max["maximum"],
         )
-        service_metadata["norm_cache_relevance"] = get_norm(
-            metadata=service_metadata,
-            attr_name="cache_relevance",
-            min=min_and_max["minimum"],
-            max=min_and_max["maximum"],
-        )
         service_metadata["norm_inversed_service_demand"] = get_norm(
             metadata=service_metadata,
             attr_name="inversed_service_demand",
@@ -283,9 +227,7 @@ def sort_services_to_relocate(server: object) -> list:
 
     services_to_relocate = sorted(
         services_to_relocate,
-        key=lambda service: service["norm_inversed_delay_sla"]
-        + service["norm_cache_relevance"]
-        + service["norm_inversed_service_demand"],
+        key=lambda service: service["norm_inversed_delay_sla"] + service["norm_inversed_service_demand"],
         reverse=True,
     )
 
@@ -299,10 +241,10 @@ def sort_candidate_servers(service: object, candidate_servers: list) -> list:
     ==========================
     => CONSIDERED CRITERIA ===
     ==========================
-        -> 1. Servers already updated
-        -> 2. Servers close enough to the user to avoid SLA violation
-        -> 3. Servers with a larger amount of cached data from layers
-        -> 4. Servers downloading the least amount of layers
+        -> 1. Servers that are already updated.
+        -> 2. Servers close enough to the user to avoid SLA violation.
+        -> 2. Servers with a larger amount of cached data from layers.
+        -> 2. Servers pulling the least amount of layers (download queue + waiting queue).
 
     Args:
         service (object): Service to be relocated.
@@ -338,9 +280,7 @@ def sort_candidate_servers(service: object, candidate_servers: list) -> list:
         #################################
         # Gathering the list of container layers used by the service's image
         service_image = ContainerImage.find_by(attribute_name="digest", attribute_value=service.image_digest)
-        service_layers = [
-            ContainerLayer.find_by(attribute_name="digest", attribute_value=digest) for digest in service_image.layers_digests
-        ]
+        service_layers = [ContainerLayer.find_by(attribute_name="digest", attribute_value=digest) for digest in service_image.layers_digests]
 
         # Gathering the list of container layers cached or about to be cached by the candidate server
         layers_downloaded = [layer for layer in server.container_layers]
@@ -405,11 +345,7 @@ def hermes(parameters: dict = {}):
         parameters (dict, optional): Algorithm parameters. Defaults to {}.
     """
     # Patching outdated servers that were previously drained out (i.e., those that are not currently hosting any service)
-    servers_to_patch = [
-        server
-        for server in EdgeServer.all()
-        if server.status == "outdated" and len(server.services) == 0 and len(server.container_registries) == 0
-    ]
+    servers_to_patch = [server for server in EdgeServer.all() if server.status == "outdated" and len(server.services) == 0 and len(server.container_registries) == 0]
     if len(servers_to_patch) > 0:
         for server in servers_to_patch:
             server.update()
@@ -424,9 +360,7 @@ def hermes(parameters: dict = {}):
         for server in servers_to_empty:
             # We consider as candidate hosts for the services all EdgeServer
             # objects not being emptied in the current maintenance step
-            candidate_servers = [
-                candidate for candidate in EdgeServer.all() if candidate not in servers_being_emptied and candidate != server
-            ]
+            candidate_servers = [candidate for candidate in EdgeServer.all() if candidate not in servers_being_emptied and candidate != server]
 
             # Defining the order in which services will be migrated from their current host
             services = sort_services_to_relocate(server=server)

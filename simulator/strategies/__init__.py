@@ -8,12 +8,7 @@ from .lamp import lamp
 
 # NSGA-II
 from .nsgaii import nsgaii
-from .nsgaii_v2 import nsgaii_v2
-from .nsgaii_v3 import nsgaii_v3
-from .nsgaii_v4 import nsgaii_v4
+from .nsgaii_evaluator import nsgaii_evaluator
 
 # Proposed maintenance strategy
 from .hermes import hermes
-from .hermes_v2 import hermes_v2
-from .hermes_v3 import hermes_v3
-from .lamp_v2 import lamp_v2

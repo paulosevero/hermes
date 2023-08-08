@@ -60,6 +60,11 @@ def service_provision(self, target_server: object):
     Args:
         target_server (object): Target server.
     """
+    # Instructing the simulator to store the relocation
+    if self.model.maintenance_batches not in self.model.placement_snapshots:
+        self.model.placement_snapshots[self.model.maintenance_batches] = []
+    self.model.placement_snapshots[self.model.maintenance_batches].append({"service_id": self.id, "edge_server_id": target_server.id})
+
     # Gathering layers present in the target server (layers, download_queue, waiting_queue)
     layers_downloaded = [layer for layer in target_server.container_layers]
     layers_on_download_queue = [flow.metadata["object"] for flow in target_server.download_queue]
@@ -73,9 +78,22 @@ def service_provision(self, target_server: object):
     sizes_of_uncached_layers = []
     sizes_of_cached_layers = []
 
+    sizes_of_layers_downloaded = []
+    sizes_of_layers_on_download_queue = []
+    sizes_of_layers_on_waiting_queue = []
+
     for layer_digest in image.layers_digests:
         # As the image only stores its layers digests, we need to get information about each of its layers
         layer_metadata = ContainerLayer.find_by(attribute_name="digest", attribute_value=layer_digest)
+
+        # Counting the number of service layers downloaded, being downloaded or queued for download in the target server
+        if any(layer.digest == layer_digest for layer in layers_downloaded):
+            sizes_of_layers_downloaded.append(layer_metadata.size)
+        elif any(layer.digest == layer_digest for layer in layers_on_download_queue):
+            sizes_of_layers_on_download_queue.append(layer_metadata.size)
+        elif any(layer.digest == layer_digest for layer in layers_on_waiting_queue):
+            sizes_of_layers_on_waiting_queue.append(layer_metadata.size)
+
         if not any(layer.digest == layer_digest for layer in layers_on_target_server):
 
             sizes_of_uncached_layers.append(layer_metadata.size)
@@ -125,6 +143,12 @@ def service_provision(self, target_server: object):
             "cache_misses": len(sizes_of_uncached_layers),
             "sizes_of_cached_layers": sizes_of_cached_layers,
             "sizes_of_uncached_layers": sizes_of_uncached_layers,
+            "sizes_of_layers_downloaded": sizes_of_layers_downloaded,
+            "sizes_of_layers_on_download_queue": sizes_of_layers_on_download_queue,
+            "sizes_of_layers_on_waiting_queue": sizes_of_layers_on_waiting_queue,
+            "number_of_layers_downloaded": len(sizes_of_layers_downloaded),
+            "number_of_layers_on_download_queue": len(sizes_of_layers_on_download_queue),
+            "number_of_layers_on_waiting_queue": len(sizes_of_layers_on_waiting_queue),
         }
     )
 
@@ -139,9 +163,7 @@ def service_step(self):
 
         # Gathering layers present in the target server (layers, download_queue, waiting_queue)
         layers_downloaded = [l for l in migration["target"].container_layers if l.digest in image.layers_digests]
-        layers_on_download_queue = [
-            flow.metadata["object"] for flow in migration["target"].download_queue if flow.metadata["object"].digest in image.layers_digests
-        ]
+        layers_on_download_queue = [flow.metadata["object"] for flow in migration["target"].download_queue if flow.metadata["object"].digest in image.layers_digests]
 
         # Setting the migration status to "pulling_layers" once any of the service layers start being downloaded
         if migration["status"] == "waiting":

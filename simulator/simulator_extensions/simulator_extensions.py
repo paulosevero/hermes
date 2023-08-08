@@ -1,14 +1,14 @@
 """ Contains the simulation management functionality."""
 # EdgeSimPy components
-from edge_sim_py.component_manager import ComponentManager
 from edge_sim_py.components import *
 
 # Python libraries
 import os
 import csv
 import time
-import json
 import msgpack
+import networkx as nx
+from statistics import mean, stdev
 
 
 ALGORITHMS_THAT_DISPLAY_METRICS_DURING_SIMULATION = ["hermes", "hermes_v2", "lamp_v2", "lamp", "salus", "greedy_least_batch"]
@@ -27,127 +27,12 @@ def immobile(user: object):
     user.coordinates_trace.extend([user.base_station.coordinates for _ in range(5000)])
 
 
-def simulator_initialize(self, input_file: str) -> None:
-    """Sets up the initial values for state variables, which includes, e.g., loading components from a dataset file.
-
-    Args:
-        input_file (str): Dataset file (URL for external JSON file, path for local JSON file, Python dictionary).
-    """
-    # Resetting the list of instances of EdgeSimPy's component classes
-    for component_class in ComponentManager.__subclasses__():
-        if component_class.__name__ != "Simulator":
-            component_class._object_count = 0
-            component_class._instances = []
-
-    # Declaring an empty variable that will receive the dataset metadata (if user passes valid information)
-    data = None
-
-    with open(input_file, "r", encoding="UTF-8") as read_file:
-        data = json.load(read_file)
-
-    # Raising exception if the dataset could not be loaded based on the specified arguments
-    if type(data) is not dict:
-        raise TypeError("EdgeSimPy could not load the dataset based on the specified arguments.")
-
-    # Creating simulator components based on the specified input data
-    missing_keys = [key for key in data.keys() if key not in globals()]
-    if len(missing_keys) > 0:
-        raise Exception(f"\n\nCould not find component classes named: {missing_keys}. Please check your input file.\n\n")
-
-    # Creating a list that will store all the relationships among components
-    components = []
-
-    # Creating the topology object and storing a reference to it as an attribute of the Simulator instance
-    topology = self.initialize_agent(agent=Topology())
-    self.topology = topology
-
-    # Creating simulator components
-    for key in data.keys():
-        if key != "Simulator" and key != "Topology":
-            for object_metadata in data[key]:
-                new_component = globals()[key]._from_dict(dictionary=object_metadata["attributes"])
-                new_component.attributes = object_metadata["attributes"]
-                new_component.relationships = object_metadata["relationships"]
-
-                if hasattr(new_component, "model") and hasattr(new_component, "unique_id"):
-                    self.initialize_agent(agent=new_component)
-
-                components.append(new_component)
-
-    # Defining relationships between components
-    ComponentManager.components = components
-    ComponentManager.topology = topology
-    for component in components:
-        for key, value in component.relationships.items():
-            # Defining attributes referencing callables (i.e., functions and methods)
-            if type(value) == str and value in globals():
-                setattr(component, f"{key}", globals()[value])
-
-            # Defining attributes referencing lists of components (e.g., lists of edge servers, users, etc.)
-            elif type(value) == list:
-                attribute_values = []
-                for item in value:
-                    obj = (
-                        globals()[item["class"]].find_by_id(item["id"])
-                        if type(item) == dict and "class" in item and item["class"] in globals()
-                        else None
-                    )
-
-                    if obj == None:
-                        raise Exception(f"List relationship '{key}' of component {component} has an invalid item: {item}.")
-
-                    attribute_values.append(obj)
-
-                setattr(component, f"{key}", attribute_values)
-
-            # Defining attributes that reference a single component (e.g., an edge server, an user, etc.)
-            elif type(value) == dict and "class" in value and "id" in value:
-                obj = (
-                    globals()[value["class"]].find_by_id(value["id"])
-                    if type(value) == dict and "class" in value and value["class"] in globals()
-                    else None
-                )
-
-                if obj == None:
-                    raise Exception(f"Relationship '{key}' of component {component} references an invalid object: {value}.")
-
-                setattr(component, f"{key}", obj)
-
-            # Defining attributes that reference a a dictionary of components (e.g., {"1": {"class": "A", "id": 1}} )
-            elif type(value) == dict and all(type(entry) == dict and "class" in entry and "id" in entry for entry in value.values()):
-                attribute = {}
-                for k, v in value.items():
-                    obj = globals()[v["class"]].find_by_id(v["id"]) if "class" in v and v["class"] in globals() else None
-                    if obj == None:
-                        raise Exception(f"Relationship '{key}' of component {component} references an invalid object: {value}.")
-                    attribute[k] = obj
-
-                setattr(component, f"{key}", attribute)
-
-            # Defining "None" attributes
-            elif value == None:
-                setattr(component, f"{key}", None)
-
-            else:
-                raise Exception(f"Couldn't add the relationship {key} with value {value}. Please check your dataset.")
-
-    # Filling the network topology
-    for link in NetworkLink.all():
-        # Adding the nodes connected by the link to the topology
-        topology.add_node(link.nodes[0])
-        topology.add_node(link.nodes[1])
-
-        # Replacing NetworkX's default link dictionary with the NetworkLink object
-        topology.add_edge(link.nodes[0], link.nodes[1])
-        topology._adj[link.nodes[0]][link.nodes[1]] = link
-        topology._adj[link.nodes[1]][link.nodes[0]] = link
-
-
 def simulator_run_model(self):
     self.executed_resource_management_algorithm = False
     # Defining initial parameters
     self.invalid_solution = False
     self.maintenance_batches = 0
+    self.placement_snapshots = {}
 
     # Calls the method that collects monitoring data about the agents
     self.monitor()
@@ -255,10 +140,19 @@ def simulator_dump_data_to_disk(self, clean_data_in_memory: bool = True) -> None
 
 
 def collect_simulation_metrics(simulator: object):
+    def get_avg(metric_metadata):
+        return sum(metric_metadata) / len(metric_metadata) if len(metric_metadata) > 0 else 0
+
     #####################################
     #### DECLARING PER BATCH METRICS ####
     #####################################
+    relocations_per_batch_and_state_size = {}
+
+    relocations_per_batch_and_sla = {}
+    delay_sla_violations_per_batch_and_sla = {}
+    updated_hosts_that_dont_violate_the_applications_slas = []
     delay_sla_violations_per_batch = 0
+
     updated_cpu_capacity_per_batch = 0
     updated_ram_capacity_per_batch = 0
     updated_disk_capacity_per_batch = 0
@@ -275,27 +169,72 @@ def collect_simulation_metrics(simulator: object):
     ###################################
     #### DECLARING OVERALL METRICS ####
     ###################################
+    services_per_host = []
+
     wait_times = []
     pulling_times = []
     state_migration_times = []
+    migration_times = []
     cache_hits = 0
     cache_misses = 0
+
     sizes_of_cached_layers = []
     sizes_of_uncached_layers = []
-    migration_times = []
+
+    sizes_of_layers_downloaded = []
+    sizes_of_layers_on_download_queue = []
+    sizes_of_layers_on_waiting_queue = []
+    number_of_layers_downloaded = []
+    number_of_layers_on_download_queue = []
+    number_of_layers_on_waiting_queue = []
+
+    longest_migration_duration = 0
+    longest_migration_waiting_time = 0
+    longest_migration_pulling_layers_time = 0
+    longest_migration_migrating_service_state_time = 0
+    longest_migration_cache_hits = 0
+    longest_migration_cache_misses = 0
+    longest_migration_sizes_of_cached_layers = 0
+    longest_migration_sizes_of_uncached_layers = 0
+    longest_migration_sizes_of_layers_downloaded = []
+    longest_migration_sizes_of_layers_on_download_queue = []
+    longest_migration_sizes_of_layers_on_waiting_queue = []
+    longest_migration_number_of_layers_downloaded = 0
+    longest_migration_number_of_layers_on_download_queue = 0
+    longest_migration_number_of_layers_on_waiting_queue = 0
 
     ######################################
     #### COLLECTING PER BATCH METRICS ####
     ######################################
+    for service in Service.all():
+        if service.state not in relocations_per_batch_and_state_size:
+            relocations_per_batch_and_state_size[service.state] = 0
+
     for user in User.all():
         for app in user.applications:
             user.set_communication_path(app=app)
             delay_sla = user.delay_slas[str(app.id)]
             delay = user._compute_delay(app=app, metric="latency")
 
+            # Calculating the number of updated edge servers that don't violate the service SLA
+            updated_hosts_that_dont_violate_the_application_sla = 0
+            for edge_server in EdgeServer.all():
+                if edge_server.status == "updated":
+                    topology = edge_server.model.topology
+                    path = nx.shortest_path(G=topology, source=user.base_station.network_switch, target=edge_server.base_station.network_switch, weight="delay")
+                    edge_server_delay = user.base_station.wireless_delay + topology.calculate_path_delay(path=path)
+
+                    if delay_sla >= edge_server_delay:
+                        updated_hosts_that_dont_violate_the_application_sla += 1
+
+            updated_hosts_that_dont_violate_the_applications_slas.append(updated_hosts_that_dont_violate_the_application_sla)
+
             # Calculating the number of delay SLA violations
             if delay > delay_sla:
                 delay_sla_violations_per_batch += 1
+                if delay_sla not in delay_sla_violations_per_batch_and_sla:
+                    delay_sla_violations_per_batch_and_sla[delay_sla] = 0
+                delay_sla_violations_per_batch_and_sla[delay_sla] += 1
 
             # Gathering service-related metrics
             for service in app.services:
@@ -316,8 +255,32 @@ def collect_simulation_metrics(simulator: object):
                     sizes_of_cached_layers.extend(migration["sizes_of_cached_layers"])
                     sizes_of_uncached_layers.extend(migration["sizes_of_uncached_layers"])
 
+                    relocations_per_batch_and_state_size[service.state] += 1
+
+                    if delay_sla not in relocations_per_batch_and_sla:
+                        relocations_per_batch_and_sla[delay_sla] = 0
+                    relocations_per_batch_and_sla[delay_sla] += 1
+
                     if migration["end"] != None:
                         migration_times.append(migration["end"] - migration["start"])
+
+                        migration_duration = migration["end"] - migration["start"]
+                        if longest_migration_duration < migration_duration:
+                            longest_migration_duration = migration_duration
+                            longest_migration_waiting_time = migration["waiting_time"]
+                            longest_migration_pulling_layers_time = migration["pulling_layers_time"]
+                            longest_migration_migrating_service_state_time = migration["migrating_service_state_time"]
+                            longest_migration_cache_hits = migration["cache_hits"]
+                            longest_migration_cache_misses = migration["cache_misses"]
+                            longest_migration_sizes_of_cached_layers = migration["sizes_of_cached_layers"]
+                            longest_migration_sizes_of_uncached_layers = migration["sizes_of_uncached_layers"]
+
+                            longest_migration_sizes_of_layers_downloaded = migration["sizes_of_layers_downloaded"]
+                            longest_migration_sizes_of_layers_on_download_queue = migration["sizes_of_layers_on_download_queue"]
+                            longest_migration_sizes_of_layers_on_waiting_queue = migration["sizes_of_layers_on_waiting_queue"]
+                            longest_migration_number_of_layers_downloaded = migration["number_of_layers_downloaded"]
+                            longest_migration_number_of_layers_on_download_queue = migration["number_of_layers_on_download_queue"]
+                            longest_migration_number_of_layers_on_waiting_queue = migration["number_of_layers_on_waiting_queue"]
 
     # Aggregating provisioning time metrics
     min_wait_times_per_batch = min(wait_times) if len(wait_times) > 0 else 0
@@ -363,8 +326,28 @@ def collect_simulation_metrics(simulator: object):
             "per_batch": {
                 "maintenance_times": [],
                 "delay_sla_violations": [],
+                "relocations_per_state_size": [],
+                "delay_sla_violations_per_sla": [],
+                "relocations_per_sla": [],
+                "updated_hosts_that_dont_violate_the_applications_slas": [],
+                "avg_updated_hosts_that_dont_violate_the_applications_slas": [],
+                "std_updated_hosts_that_dont_violate_the_applications_slas": [],
                 "services_hosted_by_updated_servers": [],
                 "services_hosted_by_outdated_servers": [],
+                "longest_migrations_duration": [],
+                "longest_migrations_waiting_time": [],
+                "longest_migrations_pulling_layers_time": [],
+                "longest_migrations_migrating_service_state_time": [],
+                "longest_migrations_cache_hits": [],
+                "longest_migrations_cache_misses": [],
+                "longest_migrations_sizes_of_cached_layers": [],
+                "longest_migrations_sizes_of_uncached_layers": [],
+                "longest_migrations_sizes_of_layers_downloaded": [],
+                "longest_migrations_sizes_of_layers_on_download_queue": [],
+                "longest_migrations_sizes_of_layers_on_waiting_queue": [],
+                "longest_migrations_number_of_layers_downloaded": [],
+                "longest_migrations_number_of_layers_on_download_queue": [],
+                "longest_migrations_number_of_layers_on_waiting_queue": [],
                 "min_wait_times": [],
                 "min_pulling_times": [],
                 "min_state_migration_times": [],
@@ -393,9 +376,18 @@ def collect_simulation_metrics(simulator: object):
     simulator.model_metrics["per_batch"]["maintenance_times"].append(simulator.schedule.steps)
 
     simulator.model_metrics["per_batch"]["delay_sla_violations"].append(delay_sla_violations_per_batch)
+    simulator.model_metrics["per_batch"]["delay_sla_violations_per_sla"].append(delay_sla_violations_per_batch_and_sla)
     simulator.model_metrics["per_batch"]["updated_cpu_capacity"].append(updated_cpu_capacity_per_batch)
     simulator.model_metrics["per_batch"]["updated_ram_capacity"].append(updated_ram_capacity_per_batch)
     simulator.model_metrics["per_batch"]["updated_disk_capacity"].append(updated_disk_capacity_per_batch)
+
+    simulator.model_metrics["per_batch"]["relocations_per_state_size"].append(relocations_per_batch_and_state_size)
+
+    simulator.model_metrics["per_batch"]["relocations_per_sla"].append(relocations_per_batch_and_sla)
+
+    simulator.model_metrics["per_batch"]["updated_hosts_that_dont_violate_the_applications_slas"].append(updated_hosts_that_dont_violate_the_applications_slas)
+    simulator.model_metrics["per_batch"]["avg_updated_hosts_that_dont_violate_the_applications_slas"].append(mean(updated_hosts_that_dont_violate_the_applications_slas))
+    simulator.model_metrics["per_batch"]["std_updated_hosts_that_dont_violate_the_applications_slas"].append(stdev(updated_hosts_that_dont_violate_the_applications_slas))
 
     simulator.model_metrics["per_batch"]["updated_cpu_capacity_available"].append(updated_cpu_capacity_available_per_batch)
     simulator.model_metrics["per_batch"]["updated_ram_capacity_available"].append(updated_ram_capacity_available_per_batch)
@@ -406,6 +398,22 @@ def collect_simulation_metrics(simulator: object):
     simulator.model_metrics["per_batch"]["outdated_disk_capacity"].append(outdated_disk_capacity_per_batch)
     simulator.model_metrics["per_batch"]["services_hosted_by_updated_servers"].append(services_hosted_by_updated_servers_per_batch)
     simulator.model_metrics["per_batch"]["services_hosted_by_outdated_servers"].append(services_hosted_by_outdated_servers_per_batch)
+
+    simulator.model_metrics["per_batch"]["longest_migrations_duration"].append(longest_migration_duration)
+    simulator.model_metrics["per_batch"]["longest_migrations_waiting_time"].append(longest_migration_waiting_time)
+    simulator.model_metrics["per_batch"]["longest_migrations_pulling_layers_time"].append(longest_migration_pulling_layers_time)
+    simulator.model_metrics["per_batch"]["longest_migrations_migrating_service_state_time"].append(longest_migration_migrating_service_state_time)
+    simulator.model_metrics["per_batch"]["longest_migrations_cache_hits"].append(longest_migration_cache_hits)
+    simulator.model_metrics["per_batch"]["longest_migrations_cache_misses"].append(longest_migration_cache_misses)
+    simulator.model_metrics["per_batch"]["longest_migrations_sizes_of_cached_layers"].append(longest_migration_sizes_of_cached_layers)
+    simulator.model_metrics["per_batch"]["longest_migrations_sizes_of_uncached_layers"].append(longest_migration_sizes_of_uncached_layers)
+
+    simulator.model_metrics["per_batch"]["longest_migrations_sizes_of_layers_downloaded"].append(longest_migration_sizes_of_layers_downloaded)
+    simulator.model_metrics["per_batch"]["longest_migrations_sizes_of_layers_on_download_queue"].append(longest_migration_sizes_of_layers_on_download_queue)
+    simulator.model_metrics["per_batch"]["longest_migrations_sizes_of_layers_on_waiting_queue"].append(longest_migration_sizes_of_layers_on_waiting_queue)
+    simulator.model_metrics["per_batch"]["longest_migrations_number_of_layers_downloaded"].append(longest_migration_number_of_layers_downloaded)
+    simulator.model_metrics["per_batch"]["longest_migrations_number_of_layers_on_download_queue"].append(longest_migration_number_of_layers_on_download_queue)
+    simulator.model_metrics["per_batch"]["longest_migrations_number_of_layers_on_waiting_queue"].append(longest_migration_number_of_layers_on_waiting_queue)
 
     simulator.model_metrics["per_batch"]["min_wait_times"].append(min_wait_times_per_batch)
     simulator.model_metrics["per_batch"]["max_wait_times"].append(max_wait_times_per_batch)
@@ -433,6 +441,7 @@ def collect_simulation_metrics(simulator: object):
         penalty = invalid_solution * EdgeServer.count() + overall_overloaded_edge_servers
         maintenance_batches = simulator.maintenance_batches
         maintenance_time = simulator.schedule.steps
+        placement_snapshots = simulator.placement_snapshots
 
         # NSGA-II parameters
         pop_size = simulator.resource_management_algorithm_parameters["pop_size"]
@@ -443,6 +452,11 @@ def collect_simulation_metrics(simulator: object):
         overall_delay_sla_violations = sum(simulator.model_metrics["per_batch"]["delay_sla_violations"])
         number_of_migrations = sum([len(s._Service__migrations) for s in Service.all()])
 
+        entire_migration_metadata = []
+
+        for edge_server in EdgeServer.all():
+            services_per_host.append(len(edge_server.services))
+
         for service in Service.all():
             for migration in service._Service__migrations:
                 cache_hits += migration["cache_hits"]
@@ -451,8 +465,28 @@ def collect_simulation_metrics(simulator: object):
                 wait_times.append(migration["waiting_time"])
                 pulling_times.append(migration["pulling_layers_time"])
                 state_migration_times.append(migration["migrating_service_state_time"])
+                entire_migration_metadata.append(
+                    {
+                        "waiting": migration["waiting_time"],
+                        "pulling": migration["pulling_layers_time"],
+                        "state_migration": migration["migrating_service_state_time"],
+                        "cache_hits": migration["cache_hits"],
+                        "cache_misses": migration["cache_misses"],
+                        "sizes_of_cached_layers": migration["sizes_of_cached_layers"],
+                        "sizes_of_uncached_layers": migration["sizes_of_uncached_layers"],
+                    }
+                )
+
                 sizes_of_cached_layers.extend(migration["sizes_of_cached_layers"])
                 sizes_of_uncached_layers.extend(migration["sizes_of_uncached_layers"])
+
+                sizes_of_layers_downloaded.extend(migration["sizes_of_layers_downloaded"])
+                sizes_of_layers_on_download_queue.extend(migration["sizes_of_layers_on_download_queue"])
+                sizes_of_layers_on_waiting_queue.extend(migration["sizes_of_layers_on_waiting_queue"])
+
+                number_of_layers_downloaded.append(migration["number_of_layers_downloaded"])
+                number_of_layers_on_download_queue.append(migration["number_of_layers_on_download_queue"])
+                number_of_layers_on_waiting_queue.append(migration["number_of_layers_on_waiting_queue"])
 
                 if migration["end"] != None:
                     migration_times.append(migration["end"] - migration["start"])
@@ -485,11 +519,18 @@ def collect_simulation_metrics(simulator: object):
         simulator.model_metrics["overall"]["invalid_solution"] = invalid_solution
         simulator.model_metrics["overall"]["penalty"] = penalty
         simulator.model_metrics["overall"]["overall_overloaded_edge_servers"] = overall_overloaded_edge_servers
+        simulator.model_metrics["overall"]["placement_snapshots"] = placement_snapshots
 
         simulator.model_metrics["overall"]["pop_size"] = pop_size
         simulator.model_metrics["overall"]["cross_prob"] = cross_prob
         simulator.model_metrics["overall"]["mut_prob"] = mut_prob
         simulator.model_metrics["overall"]["n_gen"] = n_gen
+
+        simulator.model_metrics["overall"]["entire_migration_metadata"] = entire_migration_metadata
+
+        simulator.model_metrics["overall"]["services_per_host"] = services_per_host
+        simulator.model_metrics["overall"]["avg_services_per_host"] = mean(services_per_host)
+        simulator.model_metrics["overall"]["std_services_per_host"] = stdev(services_per_host)
 
         simulator.model_metrics["overall"]["maintenance_batches"] = maintenance_batches
         simulator.model_metrics["overall"]["maintenance_time"] = maintenance_time
@@ -516,3 +557,24 @@ def collect_simulation_metrics(simulator: object):
         simulator.model_metrics["overall"]["max_state_migration_times"] = max_state_migration_times
         simulator.model_metrics["overall"]["avg_state_migration_times"] = avg_state_migration_times
         simulator.model_metrics["overall"]["overall_provisioning_time"] = overall_provisioning_time
+
+        simulator.model_metrics["overall"]["all_number_of_layers_downloaded"] = number_of_layers_downloaded
+        simulator.model_metrics["overall"]["all_number_of_layers_on_download_queue"] = number_of_layers_on_download_queue
+        simulator.model_metrics["overall"]["all_number_of_layers_on_waiting_queue"] = number_of_layers_on_waiting_queue
+        simulator.model_metrics["overall"]["all_sizes_of_layers_downloaded"] = sizes_of_layers_downloaded
+        simulator.model_metrics["overall"]["all_sizes_of_layers_on_download_queue"] = sizes_of_layers_on_download_queue
+        simulator.model_metrics["overall"]["all_sizes_of_layers_on_waiting_queue"] = sizes_of_layers_on_waiting_queue
+
+        simulator.model_metrics["overall"]["sum_sizes_of_layers_downloaded"] = sum(sizes_of_layers_downloaded)
+        simulator.model_metrics["overall"]["sum_sizes_of_layers_on_download_queue"] = sum(sizes_of_layers_on_download_queue)
+        simulator.model_metrics["overall"]["sum_sizes_of_layers_on_waiting_queue"] = sum(sizes_of_layers_on_waiting_queue)
+        simulator.model_metrics["overall"]["sum_number_of_layers_downloaded"] = sum(number_of_layers_downloaded)
+        simulator.model_metrics["overall"]["sum_number_of_layers_on_download_queue"] = sum(number_of_layers_on_download_queue)
+        simulator.model_metrics["overall"]["sum_number_of_layers_on_waiting_queue"] = sum(number_of_layers_on_waiting_queue)
+
+        simulator.model_metrics["overall"]["avg_number_of_layers_downloaded"] = get_avg(number_of_layers_downloaded)
+        simulator.model_metrics["overall"]["avg_number_of_layers_on_download_queue"] = get_avg(number_of_layers_on_download_queue)
+        simulator.model_metrics["overall"]["avg_number_of_layers_on_waiting_queue"] = get_avg(number_of_layers_on_waiting_queue)
+        simulator.model_metrics["overall"]["avg_sizes_of_layers_downloaded"] = get_avg(sizes_of_layers_downloaded)
+        simulator.model_metrics["overall"]["avg_sizes_of_layers_on_download_queue"] = get_avg(sizes_of_layers_on_download_queue)
+        simulator.model_metrics["overall"]["avg_sizes_of_layers_on_waiting_queue"] = get_avg(sizes_of_layers_on_waiting_queue)

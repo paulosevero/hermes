@@ -81,16 +81,16 @@ def randomized_closest_fit():
 
 
 # Defining a seed value to enable reproducibility
-seed(0)
+seed(1)
 
 # Creating list of map coordinates
 map_coordinates = hexagonal_grid(x_size=13, y_size=13)
 
-SERVERS_PER_SPEC = 15
+SERVERS_PER_SPEC = 12
 SERVER_PATCH_TIME = 120
 edge_server_specifications = [
     {
-        "number_of_objects": SERVERS_PER_SPEC,
+        "number_of_objects": SERVERS_PER_SPEC + 1,
         "model_name": "Server 1 - Dell PowerEdge R620",
         "patch_time": SERVER_PATCH_TIME,
         "cpu": 16,
@@ -109,16 +109,6 @@ edge_server_specifications = [
         "static_power_percentage": 265 / 1387,
         "max_power_consumption": 1387,
     },
-    # {
-    #     "number_of_objects": SERVERS_PER_SPEC,
-    #     "model_name": "Server 2 - HPE ProLiant DL360 Gen9",
-    #     "patch_time": SERVER_PATCH_TIME,
-    #     "cpu": 36,
-    #     "memory": 64,
-    #     "disk": 131072,  # 128 GB
-    #     "static_power_percentage": 45 / 276,
-    #     "max_power_consumption": 276,
-    # },
 ]
 
 # Creating base stations for providing wireless connectivity to users and network switches for wired connectivity
@@ -200,24 +190,19 @@ service_image_specifications = [
     {"state": 0, "image_name": "debian"},
     {"state": 0, "image_name": "centos"},
     {"state": 0, "image_name": "ubuntu"},
-    {"state": 0, "image_name": "clearlinux"},
     {"state": 0, "image_name": "fedora"},
     ###########################
     #### Language Runtimes ####
     ###########################
-    {"state": 0, "image_name": "python"},
-    {"state": 0, "image_name": "erlang"},
-    {"state": 0, "image_name": "groovy"},
-    {"state": 0, "image_name": "perl"},
     {"state": 0, "image_name": "elixir"},
+    {"state": 0, "image_name": "erlang"},
+    {"state": 0, "image_name": "python"},
+    {"state": 0, "image_name": "perl"},
     ##############################
     #### Generic Applications ####
     ##############################
-    {"state": 50, "image_name": "teamspeak"},  # VoIP communication system for online gaming
+    {"state": 200, "image_name": "couchbase"},  # Database
     {"state": 100, "image_name": "flink"},  # Stream and batch processing
-    {"state": 100, "image_name": "memcached"},  # Caching
-    {"state": 100, "image_name": "telegraf"},  # Monitoring
-    {"state": 200, "image_name": "mongo"},  # Database
 ]
 
 # Adding a "latest" tag to all container images
@@ -234,25 +219,15 @@ for container_image in container_image_specifications:
 
 
 container_registry_specifications = [
-    # {
-    #     "number_of_objects": 1,
-    #     "base_station_id": 82,
-    #     "edge_server_specification": next((spec for spec in edge_server_specifications if "Server 1" in spec["model_name"]), None),
-    #     "images": condensed_images_metadata,
-    # },
-    # {
-    #     "number_of_objects": 1,
-    #     "base_station_id": 88,
-    #     "edge_server_specification": next((spec for spec in edge_server_specifications if "Server 1" in spec["model_name"]), None),
-    #     "images": condensed_images_metadata,
-    # },
     {
         "number_of_objects": 1,
         "base_station_id": 85,
         "edge_server_specification": next((spec for spec in edge_server_specifications if "Server 1" in spec["model_name"]), None),
         "images": condensed_images_metadata,
+        "bandwidth": 5,  # 5MB/s ==> https://doi.org/10.1109/ACCESS.2020.3038287 (page 6, left column)
     },
 ]
+
 
 # Parsing the specifications for container images and container registries
 registries = create_container_registries(
@@ -280,6 +255,10 @@ for index, registry_spec in enumerate(container_registry_specifications):
     registry_base_station = BaseStation.find_by_id(registry_spec["base_station_id"])
     registry_base_station._connect_to_edge_server(edge_server=registry_host)
 
+    # Updating the bandwidth of links that connect other nodes to the registry
+    for link in Topology.first().edges(registry_base_station.network_switch):
+        Topology.first()[link[0]][link[1]]["bandwidth"] = registry_spec["bandwidth"]
+
     # Updating the registry CPU and RAM demand to fill its host
     registries[index]["cpu_demand"] = registry_host_spec["cpu"]
     registries[index]["memory_demand"] = registry_host_spec["memory"]
@@ -305,7 +284,7 @@ service_demands = [
 ]
 
 
-SERVICES_PER_SPEC = 5
+SERVICES_PER_SPEC = 6
 TOTAL_SERVICES = len(service_image_specifications) * SERVICES_PER_SPEC
 service_image_specification_values = uniform(n_items=TOTAL_SERVICES, valid_values=service_image_specifications)
 
@@ -523,5 +502,5 @@ EdgeServer.update = edge_server_update
 EdgeServer.step = edge_server_step
 
 # Exporting scenario
-ComponentManager.export_scenario(save_to_file=True, file_name="dataset2")
+ComponentManager.export_scenario(save_to_file=True, file_name="dataset1")
 display_topology(Topology.first())

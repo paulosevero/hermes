@@ -1,4 +1,4 @@
-# Python libraries
+    # Python libraries
 import json
 import tabulate
 
@@ -11,24 +11,19 @@ IMAGES_OF_INTEREST = [
     "debian",
     "centos",
     "ubuntu",
-    "clearlinux",
     "fedora",
     ###########################
     #### Language Runtimes ####
     ###########################
     "python",
     "erlang",
-    "groovy",
     "perl",
     "elixir",
     ##############################
     #### Generic Applications ####
     ##############################
-    "teamspeak",
     "flink",
-    "memcached",
-    "telegraf",
-    "mongo",
+    "couchbase",
 ]
 
 with open("top150_images_dockerhub.json", "r", encoding="UTF-8") as read_file:
@@ -116,8 +111,8 @@ print(f"Total number of layers: {len(unique_layers) + len(shared_layers)}")
 print(f"Number of unique layers: {len(unique_layers)}")
 print(f"Number of shared layers: {len(shared_layers)}")
 print(f"Total Size of layers: {size_unique_layers + size_shared_layers}")
-print(f"Size of unique layers: {size_unique_layers} ({round(size_unique_layers / total_size_layers * 100)}% of total)")
-print(f"Size of shared layers: {size_shared_layers} ({round(size_shared_layers / total_size_layers * 100)}% of total)")
+print(f"Size of unique layers: {size_unique_layers} ({round(size_unique_layers / total_size_layers * 100, 2)}% of total)")
+print(f"Size of shared layers: {size_shared_layers} ({round(size_shared_layers / total_size_layers * 100, 2)}% of total)")
 
 print("\n")
 
